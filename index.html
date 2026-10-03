@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Where it went</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app" id="app">
+  <header class="top">
+    <div class="brand">Where it went</div>
+    <nav class="tabs" aria-label="Views">
+      <button type="button" data-view="dashboard" aria-current="page">Dashboard</button>
+      <button type="button" data-view="records">Transactions</button>
+      <button type="button" data-view="settings">Settings</button>
+    </nav>
+  </header>
+
+  <div class="banner" id="banner" role="alert" hidden></div>
+
+  <section class="entry" id="entry" data-type="expense" aria-label="Log a transaction">
+    <div class="entry-head">
+      <h2 id="entryTitle">Log a transaction</h2>
+      <button type="button" class="linkbtn" id="cancelEdit" hidden>Cancel edit</button>
+    </div>
+    <form id="txForm" novalidate autocomplete="off">
+      <div class="seg" role="radiogroup" aria-label="Transaction type">
+        <input type="radio" name="type" id="tExp" value="expense" checked><label for="tExp">Expense</label>
+        <input type="radio" name="type" id="tInc" value="income"><label for="tInc">Income</label>
+      </div>
+      <label class="f amt"><span>Amount</span>
+        <div class="money"><i id="curSym">$</i><input id="amount" inputmode="decimal" placeholder="0.00" aria-describedby="formErr"></div>
+      </label>
+      <label class="f cat"><span>Category</span><select class="inp" id="category"></select></label>
+      <label class="f"><span>Date</span><input class="inp" type="date" id="date"></label>
+      <label class="f note"><span>Note (optional)</span><input class="inp" type="text" id="note" maxlength="80" placeholder="What was it for?"></label>
+      <button class="primary" id="saveBtn" type="submit">Save</button>
+    </form>
+    <p class="err" id="formErr" role="alert"></p>
+  </section>
+
+  <main>
+    <section id="viewDash" aria-label="Dashboard">
+      <p class="greet" id="greet"></p>
+      <div class="monthbar">
+        <button type="button" class="circ" id="prevM" aria-label="Previous month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
+        <h1 id="monthLabel"></h1>
+        <button type="button" class="circ" id="nextM" aria-label="Next month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></button>
+        <button type="button" class="linkbtn" id="thisM">Back to this month</button>
+      </div>
+
+      <div class="hero">
+        <div>
+          <p class="hero-label">Total spent</p>
+          <p class="hero-num" id="heroNum">0</p>
+          <p class="hero-delta" id="heroDelta"></p>
+        </div>
+        <dl class="hero-side">
+          <div><dt>Income</dt><dd id="incNum">0</dd></div>
+          <div><dt>Net</dt><dd id="netNum">0</dd></div>
+          <div id="balBox" hidden><dt>Balance</dt><dd id="balNum">0</dd></div>
+        </dl>
+      </div>
+
+      <div class="panels">
+        <section class="panel" aria-labelledby="catH">
+          <div class="panel-head"><h2 id="catH">By category</h2></div>
+          <div id="cats"></div>
+        </section>
+        <section class="panel" aria-labelledby="trendH">
+          <div class="panel-head">
+            <h2 id="trendH">Income vs. expenses</h2>
+            <div class="toggle" role="group" aria-label="Chart range">
+              <button type="button" data-trend="days" aria-pressed="true">Daily</button>
+              <button type="button" data-trend="months" aria-pressed="false">6 months</button>
+            </div>
+          </div>
+          <div class="legend" id="legend"></div>
+          <p class="caption" id="caption"></p>
+          <div id="chartWrap"></div>
+        </section>
+      </div>
+    </section>
+
+    <section id="viewRecords" aria-label="Transactions" hidden>
+      <div class="filters">
+        <input class="inp search" type="search" id="fQ" placeholder="Search notes and categories" aria-label="Search transactions">
+        <select class="inp" id="fType" aria-label="Type">
+          <option value="all">All types</option>
+          <option value="expense">Expenses</option>
+          <option value="income">Income</option>
+        </select>
+        <select class="inp" id="fCat" aria-label="Category"></select>
+        <select class="inp" id="fPeriod" aria-label="Period">
+          <option value="month"></option>
+          <option value="all">All time</option>
+        </select>
+      </div>
+      <p class="sum" id="recSum"></p>
+      <div id="recList"></div>
+    </section>
+
+    <section id="viewSettings" aria-label="Settings" hidden>
+      <div class="set">
+        <section class="panel" aria-labelledby="sProfileH">
+          <h2 id="sProfileH">Profile</h2>
+          <p class="hint">Your name appears in the greeting on the dashboard.</p>
+          <div class="fields">
+            <label class="f"><span>Your name</span><input class="inp" type="text" id="sName" maxlength="40" placeholder="Optional" autocomplete="given-name"></label>
+            <div class="acct" id="acct"></div>
+          </div>
+        </section>
+
+        <section class="panel" aria-labelledby="sLookH">
+          <h2 id="sLookH">Appearance</h2>
+          <p class="hint">Pick a theme. It applies right away and is remembered.</p>
+          <div class="fields">
+            <div class="skins" id="skinPick" role="radiogroup" aria-label="Theme"></div>
+            <label class="f"><span>Open the app on</span>
+              <select class="inp" id="sOpenOn"><option value="dashboard">Dashboard</option><option value="records">Transactions</option></select>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel" aria-labelledby="sMoneyH">
+          <h2 id="sMoneyH">Money</h2>
+          <p class="hint">Changing the currency only changes how amounts are shown. It does not convert them.</p>
+          <div class="fields two">
+            <label class="f"><span>Currency</span><select class="inp" id="currency"></select></label>
+            <label class="f"><span>Starting balance (optional)</span><input class="inp" type="text" id="sOpening" inputmode="decimal" placeholder="Leave blank to hide balance"></label>
+          </div>
+          <p class="err" id="sMoneyErr" role="alert"></p>
+        </section>
+
+        <section class="panel" aria-labelledby="sCatH">
+          <h2 id="sCatH">Your categories</h2>
+          <p class="hint">Add categories that fit your life. Removing one moves its transactions to Other.</p>
+          <ul class="clist" id="catList"></ul>
+          <form id="catForm" novalidate autocomplete="off">
+            <label class="f"><span>New category</span><input class="inp" type="text" id="ccName" maxlength="30" placeholder="e.g. Pets"></label>
+            <label class="f"><span>Type</span><select class="inp" id="ccType"><option value="expense">Expense</option><option value="income">Income</option></select></label>
+            <button class="secondary" type="submit">Add category</button>
+            <div class="sw" role="radiogroup" aria-label="Category color"></div>
+          </form>
+          <p class="err" id="ccErr" role="alert"></p>
+        </section>
+
+        <section class="panel" aria-labelledby="sDataH">
+          <h2 id="sDataH">Your data</h2>
+          <p class="hint" id="dataHint"></p>
+          <div class="btnrow">
+            <button type="button" class="secondary" data-act="export" id="exportBtn">Export as CSV</button>
+            <button type="button" class="secondary" data-act="import">Import CSV</button>
+            <input type="file" id="importFile" accept=".csv,text/csv" hidden>
+            <button type="button" class="secondary" data-act="sample">Add sample data</button>
+            <button type="button" class="secondary" data-act="replay">Show welcome again</button>
+            <button type="button" class="linkbtn danger" data-act="erase">Erase all transactions</button>
+          </div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span class="status" id="status" data-s="device"><i></i><span id="statusText">Saved on this device only</span></span>
+  </footer>
+</div>
+
+<div class="overlay" id="welcome" role="dialog" aria-modal="true" aria-labelledby="wTitle" hidden>
+  <div class="wcard">
+    <h2 id="wTitle">Welcome to Where it went</h2>
+    <p class="lead">A quiet place to log what you earn and spend, then see where it goes. There are no budgets or limits. Make it yours below; you can change any of this later in Settings.</p>
+    <ul class="how">
+      <li>Log a transaction in a few seconds.</li>
+      <li>Read your month on the dashboard.</li>
+      <li>Fix mistakes from the Transactions tab.</li>
+    </ul>
+    <div class="acct" id="wAccount"></div>
+    <div class="wform">
+      <label class="f"><span>What should we call you? (optional)</span><input class="inp" type="text" id="wName" maxlength="40" autocomplete="given-name"></label>
+      <div class="two">
+        <label class="f"><span>Currency</span><select class="inp" id="wCurrency"></select></label>
+        <label class="f"><span>Starting balance (optional)</span><input class="inp" type="text" id="wOpening" inputmode="decimal" placeholder="0.00"></label>
+      </div>
+      <div class="f"><span class="lbl" id="wThemeLbl">Theme</span><div class="skins" id="wSkins" role="radiogroup" aria-labelledby="wThemeLbl"></div></div>
+    </div>
+    <p class="err" id="wErr" role="alert"></p>
+    <div class="wact">
+      <button class="primary" id="wStart" type="button">Start tracking</button>
+      <button class="linkbtn" id="wSample" type="button">Start with sample data</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="auth" role="dialog" aria-modal="true" aria-labelledby="aTitle" hidden>
+  <div class="wcard">
+    <h2 id="aTitle">Welcome back</h2>
+    <p class="lead" id="aLead">Sign in to see your spending.</p>
+    <div class="toggle" id="authToggle" role="group" aria-label="Sign in or create an account">
+      <button type="button" data-amode="signin" aria-pressed="true">Sign in</button>
+      <button type="button" data-amode="signup" aria-pressed="false">Create account</button>
+    </div>
+    <form id="authForm" novalidate>
+      <label class="f" id="aEmailWrap"><span>Email</span><input class="inp" type="email" id="aEmail" autocomplete="email"></label>
+      <label class="f"><span id="aPassLbl">Password</span><input class="inp" type="password" id="aPass" autocomplete="current-password"></label>
+      <p class="err" id="aErr" role="alert"></p>
+      <p class="info" id="aInfo" role="status"></p>
+      <div class="wact"><button class="primary" id="aSubmit" type="submit">Sign in</button></div>
+    </form>
+    <div class="btnrow authlinks" id="authLinks">
+      <button class="linkbtn" id="aMagic" type="button">Email me a sign-in link</button>
+      <button class="linkbtn" id="aForgot" type="button">Forgot password?</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="setup" role="dialog" aria-modal="true" aria-labelledby="sTitle" hidden>
+  <div class="wcard">
+    <h2 id="sTitle">Connect Supabase</h2>
+    <p class="lead" id="setupMsg"></p>
+  </div>
+</div>
+
+<div class="toastwrap"><div class="toast" id="toast" role="status" aria-live="polite"></div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
