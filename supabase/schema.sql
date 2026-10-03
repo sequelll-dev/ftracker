@@ -1,4 +1,4 @@
--- Where it went: database schema for Supabase.
+-- Finance Tracker: database schema for Supabase.
 -- Run this once in the Supabase dashboard: SQL Editor > New query > paste > Run.
 -- It is safe to run on an empty project. Re-running it will fail on "already exists".
 
@@ -11,8 +11,7 @@ create table public.settings (
   user_id    uuid primary key default auth.uid() references auth.users (id) on delete cascade,
   currency   text not null default 'USD' check (char_length(currency) = 3),
   name       text not null default '' check (char_length(name) <= 40),
-  skin       text not null default 'auto'
-             check (skin in ('auto','mist','sage','ocean','blush','night','dusk')),
+  skin       text not null default 'auto' check (char_length(skin) between 1 and 20),
   opening    numeric(14,2),
   open_on    text not null default 'dashboard' check (open_on in ('dashboard','records')),
   onboarded  boolean not null default false,
