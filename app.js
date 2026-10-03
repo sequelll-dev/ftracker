@@ -4,18 +4,19 @@
 /* ---------- constants ---------- */
 const BASE_EXP=[['food','Groceries'],['dining','Dining out'],['transport','Transport'],['housing','Housing & utilities'],['health','Health'],['shopping','Shopping'],['fun','Entertainment'],['bills','Bills & subscriptions'],['edu','Education'],['other','Other']];
 const BASE_INC=[['salary','Salary'],['freelance','Freelance'],['invest','Investments'],['gift','Gifts'],['otherinc','Other income']];
-const CURRENCIES=['PHP','USD','EUR','GBP','JPY','AUD','CAD','SGD','INR'];
+const CURRENCIES=['PHP'];
 const SKINS=[
   {id:'auto',label:'Match device',bg:'linear-gradient(105deg,#EEF1F0 50%,#0F171C 50%)',surface:'#8A9AA3',accent:'#5C6BD0'},
   {id:'mist',label:'Mist',bg:'#EEF1F0',surface:'#FFFFFF',accent:'#2B45D8'},
   {id:'sage',label:'Sage',bg:'#E8EFE7',surface:'#FFFFFF',accent:'#2E6B4D'},
   {id:'ocean',label:'Ocean',bg:'#E5EEF4',surface:'#FFFFFF',accent:'#0A62A8'},
   {id:'blush',label:'Blush',bg:'#F5EBEE',surface:'#FFFFFF',accent:'#B3315A'},
+  {id:'coquette',label:'Coquette',bg:'#FFF4F7',surface:'#FFFFFF',accent:'#C93A6E'},
   {id:'night',label:'Night',bg:'#0F171C',surface:'#1D2B33',accent:'#8FA2FF'},
   {id:'dusk',label:'Dusk',bg:'#16131F',surface:'#271F36',accent:'#B79CFF'}
 ];
 const SKIN_IDS=SKINS.map(s=>s.id);
-const SKIN_KEY='where-it-went:skin';
+const SKIN_KEY='finance-tracker:skin';
 
 /* ---------- helpers ---------- */
 const $=s=>document.querySelector(s);
@@ -28,13 +29,9 @@ const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'
 const uid=()=>(window.crypto&&crypto.randomUUID)?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2,10);
 const reduceMotion=()=>window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-function detectCurrency(){
-  const region=((navigator.language||'en-US').split('-')[1]||'').toUpperCase();
-  const map={PH:'PHP',US:'USD',GB:'GBP',JP:'JPY',AU:'AUD',CA:'CAD',SG:'SGD',IN:'INR',DE:'EUR',FR:'EUR',ES:'EUR',IT:'EUR',NL:'EUR',IE:'EUR'};
-  return map[region]||'USD';
-}
+function detectCurrency(){return 'PHP';}
 const fmts={};
-const fmt=c=>fmts[c]||(fmts[c]=new Intl.NumberFormat(undefined,{style:'currency',currency:c,currencyDisplay:'narrowSymbol'}));
+const fmt=c=>fmts[c]||(fmts[c]=new Intl.NumberFormat('en-PH',{style:'currency',currency:c,currencyDisplay:'narrowSymbol'}));
 const state={tx:[],currency:detectCurrency(),
   prefs:{name:'',skin:'auto',opening:null,openOn:'dashboard',onboarded:false,customCats:[]},
   view:'dashboard',month:todayStr().slice(0,7),trend:'days',
@@ -212,7 +209,7 @@ async function reloadCats(){
 function subscribe(){
   if(channel){sb.removeChannel(channel);channel=null;}
   const mine='user_id=eq.'+userId;
-  channel=sb.channel('where-it-went-'+userId)
+  channel=sb.channel('finance-tracker-'+userId)
     .on('postgres_changes',{event:'INSERT',schema:'public',table:'transactions',filter:mine},onTxEvent)
     .on('postgres_changes',{event:'UPDATE',schema:'public',table:'transactions',filter:mine},onTxEvent)
     .on('postgres_changes',{event:'DELETE',schema:'public',table:'transactions'},onTxEvent)
@@ -278,7 +275,7 @@ async function addMany(list){
   }
 }
 function loadSample(){
-  const scale={PHP:50,JPY:140,INR:80}[state.currency]||1;
+  const scale=50;
   const r=(a,b)=>r2((a+Math.random()*(b-a))*scale);
   const pick=a=>a[Math.floor(Math.random()*a.length)];
   const now=new Date(), out=[];
@@ -405,8 +402,10 @@ function setView(v){
   state.view=v;
   $('#viewDash').hidden=v!=='dashboard'; $('#viewRecords').hidden=v!=='records'; $('#viewSettings').hidden=v!=='settings';
   $('#entry').hidden=v==='settings';
+  const vEl={dashboard:$('#viewDash'),records:$('#viewRecords'),settings:$('#viewSettings')}[v];
+  vEl.classList.remove('enter'); void vEl.offsetWidth; vEl.classList.add('enter');
   document.querySelectorAll('.tabs button').forEach(b=>{if(b.dataset.view===v)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
-  if(v==='dashboard')drawTrend(); else if(v==='records')renderRecords(); else syncSettingsUI();
+  if(v==='dashboard'){playIntro();renderHero();renderCats();drawTrend();} else if(v==='records')renderRecords(); else syncSettingsUI();
 }
 const monthTx=m=>state.tx.filter(t=>t.date.startsWith(m));
 function totals(list){let e=0,i=0;list.forEach(t=>{if(t.type==='expense')e+=t.amount;else i+=t.amount;});return {exp:r2(e),inc:r2(i)};}
@@ -424,7 +423,8 @@ function renderHero(){
   const maxM=[curYM(),...state.tx.map(t=>t.date.slice(0,7))].sort().pop();
   $('#nextM').disabled=m>=maxM;
   $('#thisM').hidden=m===curYM();
-  $('#heroNum').textContent=money(tt.exp);
+  if(state.countUp){state.countUp=false;animateMoney($('#heroNum'),tt.exp);}
+  else{cancelAnimationFrame($('#heroNum')._raf);$('#heroNum').textContent=money(tt.exp);}
   $('#incNum').textContent=money(tt.inc);
   const net=r2(tt.inc-tt.exp), nn=$('#netNum');
   nn.textContent=signed(net); nn.className=net>0?'pos':net<0?'neg':'';
@@ -532,9 +532,9 @@ function drawTrend(){
   });
   const label='Line chart of income and expenses. '+d.caption+' Income '+money(d.totInc)+', expenses '+money(d.totExp)+'.';
   wrap.innerHTML='<svg class="chart" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+esc(label)+'">'+grid+xl+
-    '<path d="'+path(d.inc)+'" fill="none" stroke="var(--inc)" stroke-width="2.6" stroke-dasharray="7 5" stroke-linecap="round" stroke-linejoin="round"/>'+
+    '<g class="lines"><path d="'+path(d.inc)+'" fill="none" stroke="var(--inc)" stroke-width="2.6" stroke-dasharray="7 5" stroke-linecap="round" stroke-linejoin="round"/>'+
     '<path d="'+path(d.exp)+'" fill="none" stroke="var(--exp)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>'+
-    marks+
+    marks+'</g>'+
     '<g id="hov" visibility="hidden"><line id="hovLine" y1="'+T+'" y2="'+(T+ih)+'" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3"/>'+
     '<circle id="hovI" r="5" fill="var(--surface)" stroke="var(--inc)" stroke-width="2.4"/><circle id="hovE" r="5" fill="var(--exp)" stroke="var(--surface)" stroke-width="1.5"/></g>'+
     '<rect id="hit" x="'+L+'" y="'+T+'" width="'+iw+'" height="'+ih+'" fill="transparent"/></svg><div class="tip" id="tip" hidden></div>';
@@ -616,13 +616,12 @@ function syncFilterUI(){
 }
 function syncCurrencyUI(){
   $('#curSym').textContent=symbolOf(state.currency);
-  $('#currency').value=state.currency; $('#wCurrency').value=state.currency;
 }
 
 /* ---------- account, themes, settings ---------- */
 function accountHTML(withBtn){
   if(account.signedIn){
-    return '<p>Signed in as <b>'+esc(account.email)+'</b>. Your data lives in your Supabase project and is protected by row-level security, so only your account can read it.</p>'+
+    return '<p>Signed in as <b>'+esc(account.email)+'</b>.</p>'+
       (withBtn?'<button type="button" class="secondary" data-act="signout">Sign out</button>':'');
   }
   return '<p><b>Not signed in.</b></p>';
@@ -710,7 +709,7 @@ function exportCsv(){
     .map(t=>[t.date,t.type,q((CAT[t.category]||CAT.other).label),t.amount.toFixed(2),q(t.note)].join(',')));
   const blob=new Blob(['\ufeff'+rows.join('\n')],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob); a.download='where-it-went-'+todayStr()+'.csv';
+  a.href=URL.createObjectURL(blob); a.download='finance-tracker-'+todayStr()+'.csv';
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }
@@ -777,7 +776,6 @@ function finishWelcome(sample){
   const first=!state.prefs.onboarded;
   state.prefs.name=$('#wName').value.trim().slice(0,40);
   state.prefs.opening=op;
-  state.currency=$('#wCurrency').value;
   state.prefs.onboarded=true;
   closeWelcome(); syncCurrencyUI();
   saveSettings();
@@ -828,6 +826,7 @@ function showAuth(mode){
   authMsg('');
   $('#auth').hidden=false; $('#app').inert=true;
   setTimeout(()=>(rec?$('#aPass'):$('#aEmail')).focus(),30);
+  hideBoot();
 }
 function hideAuth(){$('#auth').hidden=true;$('#app').inert=false;$('#aPass').value='';}
 function showSetup(kind){
@@ -835,7 +834,7 @@ function showSetup(kind){
   $('#setupMsg').innerHTML=kind==='lib'
     ?'The Supabase library could not be loaded. Check your internet connection and reload, or host <span class="code">supabase.js</span> yourself and update the script tag in <span class="code">index.html</span>.'
     :'Open <span class="code">config.js</span> and paste your Supabase project URL and anon key, then reload this page. The README walks through it.';
-  $('#setup').hidden=false;
+  $('#setup').hidden=false; hideBoot();
 }
 function authBusy(on){
   authWorking=on;
@@ -901,15 +900,15 @@ async function onSignedIn(session){
   if(booting||(loaded&&userId===session.user.id))return;
   booting=true;
   userId=session.user.id; account.signedIn=true; account.email=session.user.email||'';
-  hideAuth(); hideBanner();
+  showBoot(); hideAuth(); hideBanner();
   try{
     await loadAll(); loaded=true;
     if(!trendTouched)autoTrend();
-    syncCurrencyUI(); refreshCatUIs(); setView(state.prefs.openOn); renderAll();
+    syncCurrencyUI(); refreshCatUIs(); playIntro(); setView(state.prefs.openOn); renderAll();
     subscribe(); setStatus('synced');
-    settle();
+    settle(); hideBoot();
   }catch(e){
-    console.error(e); setStatus('error'); userId=null; account.signedIn=false;
+    console.error(e); setStatus('error'); userId=null; account.signedIn=false; hideBoot();
     const hint=/relation|does not exist|schema cache|PGRST20/i.test(String((e&&e.message)||''))
       ?' Run supabase/schema.sql in your project first.':'';
     showBanner("Couldn't load your data."+hint,()=>{booting=false;onSignedIn(session);});
@@ -939,11 +938,44 @@ function bootAuth(){
   });
 }
 
+/* ---------- loading screen + motion ---------- */
+let bootShownAt=Date.now(), bootTimer=null, playTimer=null;
+function showBoot(){
+  const b=$('#boot'); if(!b.hidden)return;
+  clearTimeout(bootTimer); b.classList.remove('out'); b.hidden=false; bootShownAt=Date.now();
+}
+function hideBoot(){
+  const b=$('#boot'); if(b.hidden)return;
+  const wait=Math.max(0,800-(Date.now()-bootShownAt));    // avoid a flash on fast connections
+  clearTimeout(bootTimer);
+  bootTimer=setTimeout(()=>{
+    b.classList.add('out');
+    setTimeout(()=>{b.hidden=true;b.classList.remove('out');},420);
+  },wait);
+}
+function playIntro(){            // bars grow, lines rise, hero number counts up
+  if(reduceMotion())return;
+  const els=[$('#cats'),$('#chartWrap')];
+  els.forEach(e=>e.classList.add('play'));
+  state.countUp=true;
+  clearTimeout(playTimer);
+  playTimer=setTimeout(()=>els.forEach(e=>e.classList.remove('play')),1200);
+}
+function animateMoney(el,to){
+  cancelAnimationFrame(el._raf);
+  if(reduceMotion()||!isFinite(to)||to===0){el.textContent=money(to);return;}
+  const t0=performance.now(), dur=650;
+  const step=now=>{
+    const p=Math.min(1,(now-t0)/dur), e=1-Math.pow(1-p,3);
+    el.textContent=money(p<1?r2(to*e):to);
+    if(p<1)el._raf=requestAnimationFrame(step);
+  };
+  el._raf=requestAnimationFrame(step);
+}
+
 /* ---------- wiring ---------- */
 function init(){
   loadSkinCache(); rebuildCats(); applySkin(); wireAuth();
-  $('#currency').innerHTML=CURRENCIES.map(c=>'<option value="'+c+'">'+c+' ('+esc(symbolOf(c))+')</option>').join('');
-  $('#wCurrency').innerHTML=$('#currency').innerHTML;
   $('.sw').innerHTML=[1,2,3,4,5,6,7,8].map(i=>'<label><input type="radio" name="cc" value="'+i+'"'+(i===1?' checked':'')+' aria-label="Color '+i+'"><span style="background:var(--u'+i+')"></span></label>').join('');
   fillCategories('expense'); fillFilterCats(); syncFilterUI(); syncCurrencyUI();
   $('#date').value=todayStr();
@@ -957,9 +989,9 @@ function init(){
   $('#cancelEdit').addEventListener('click',exitEdit);
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&state.editingId&&!welcomeOpen)exitEdit();});
 
-  $('#prevM').addEventListener('click',()=>{state.month=addM(state.month,-1);renderAll();});
-  $('#nextM').addEventListener('click',()=>{state.month=addM(state.month,1);renderAll();});
-  $('#thisM').addEventListener('click',()=>{state.month=curYM();renderAll();});
+  $('#prevM').addEventListener('click',()=>{state.month=addM(state.month,-1);playIntro();renderAll();});
+  $('#nextM').addEventListener('click',()=>{state.month=addM(state.month,1);playIntro();renderAll();});
+  $('#thisM').addEventListener('click',()=>{state.month=curYM();playIntro();renderAll();});
   document.querySelectorAll('[data-trend]').forEach(b=>b.addEventListener('click',()=>{
     state.trend=b.dataset.trend; trendTouched=true; drawTrend();
   }));
@@ -978,7 +1010,6 @@ function init(){
   /* settings */
   $('#sName').addEventListener('change',e=>{state.prefs.name=e.target.value.trim().slice(0,40);saveSettings();});
   $('#sOpenOn').addEventListener('change',e=>{state.prefs.openOn=e.target.value;saveSettings();});
-  $('#currency').addEventListener('change',e=>{state.currency=e.target.value;syncCurrencyUI();saveSettings();});
   $('#sOpening').addEventListener('change',e=>{
     const v=parseSigned(e.target.value);
     if(v===undefined){$('#sMoneyErr').textContent='Starting balance should be a number, like 1200 or -50.';return;}
@@ -1011,7 +1042,6 @@ function init(){
   /* welcome */
   $('#wStart').addEventListener('click',()=>finishWelcome(false));
   $('#wSample').addEventListener('click',()=>finishWelcome(true));
-  $('#wCurrency').addEventListener('change',e=>{state.currency=e.target.value;syncCurrencyUI();});
   ['#wName','#wOpening'].forEach(s=>$(s).addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();finishWelcome(false);}}));
 
   if('ResizeObserver' in window){
@@ -1023,6 +1053,7 @@ function init(){
   }
 
   setView('dashboard'); renderAll(); renderAccount();
+  setTimeout(hideBoot,10000);    // never trap the user behind the loader
   bootAuth();
 }
 init();

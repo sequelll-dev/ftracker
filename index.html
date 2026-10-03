@@ -3,16 +3,25 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Where it went</title>
+<title>Finance Tracker</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Figtree:wght@400;500;600&family=DM+Serif+Display&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+<div class="boot" id="boot" role="status" aria-live="polite">
+  <div class="boot-in">
+    <div class="bars" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+    <svg class="bowload" viewBox="0 0 100 100" aria-hidden="true"><g fill="#F28FB2" stroke="#E26A97" stroke-width="2" stroke-linejoin="round"><path d="M50 38C36 18 8 18 8 34C8 50 34 52 50 38Z"/><path d="M50 38C64 18 92 18 92 34C92 50 66 52 50 38Z"/><path d="M47 42C40 60 30 74 22 90L36 86L42 96C46 78 50 62 53 44Z"/><path d="M53 42C60 60 70 74 78 90L64 86L58 96C54 78 50 62 47 44Z"/><ellipse fill="#E26A97" cx="50" cy="38" rx="8" ry="7"/></g><g transform="translate(14 14)"><path class="sp" d="M0-6C1-1 1-1 6 0C1 1 1 1 0 6C-1 1-1 1-6 0C-1-1-1-1 0-6Z" fill="#F28FB2"/></g><g transform="translate(88 20)"><path class="sp s2" d="M0-6C1-1 1-1 6 0C1 1 1 1 0 6C-1 1-1 1-6 0C-1-1-1-1 0-6Z" fill="#F28FB2"/></g><g transform="translate(86 74)"><path class="sp s3" d="M0-6C1-1 1-1 6 0C1 1 1 1 0 6C-1 1-1 1-6 0C-1-1-1-1 0-6Z" fill="#F28FB2"/></g></svg>
+    <p class="boot-name">Finance Tracker</p>
+    <p class="boot-sub">Getting your numbers ready</p>
+  </div>
+</div>
+
 <div class="app" id="app">
   <header class="top">
-    <div class="brand">Where it went</div>
+    <div class="brand">Finance Tracker</div>
     <nav class="tabs" aria-label="Views">
       <button type="button" data-view="dashboard" aria-current="page">Dashboard</button>
       <button type="button" data-view="records">Transactions</button>
@@ -128,9 +137,8 @@
 
         <section class="panel" aria-labelledby="sMoneyH">
           <h2 id="sMoneyH">Money</h2>
-          <p class="hint">Changing the currency only changes how amounts are shown. It does not convert them.</p>
-          <div class="fields two">
-            <label class="f"><span>Currency</span><select class="inp" id="currency"></select></label>
+          <p class="hint">Amounts are shown in Philippine pesos.</p>
+          <div class="fields">
             <label class="f"><span>Starting balance (optional)</span><input class="inp" type="text" id="sOpening" inputmode="decimal" placeholder="Leave blank to hide balance"></label>
           </div>
           <p class="err" id="sMoneyErr" role="alert"></p>
@@ -172,7 +180,7 @@
 
 <div class="overlay" id="welcome" role="dialog" aria-modal="true" aria-labelledby="wTitle" hidden>
   <div class="wcard">
-    <h2 id="wTitle">Welcome to Where it went</h2>
+    <h2 id="wTitle">Welcome to Finance Tracker</h2>
     <p class="lead">A quiet place to log what you earn and spend, then see where it goes. There are no budgets or limits. Make it yours below; you can change any of this later in Settings.</p>
     <ul class="how">
       <li>Log a transaction in a few seconds.</li>
@@ -182,8 +190,7 @@
     <div class="acct" id="wAccount"></div>
     <div class="wform">
       <label class="f"><span>What should we call you? (optional)</span><input class="inp" type="text" id="wName" maxlength="40" autocomplete="given-name"></label>
-      <div class="two">
-        <label class="f"><span>Currency</span><select class="inp" id="wCurrency"></select></label>
+      <div>
         <label class="f"><span>Starting balance (optional)</span><input class="inp" type="text" id="wOpening" inputmode="decimal" placeholder="0.00"></label>
       </div>
       <div class="f"><span class="lbl" id="wThemeLbl">Theme</span><div class="skins" id="wSkins" role="radiogroup" aria-labelledby="wThemeLbl"></div></div>
