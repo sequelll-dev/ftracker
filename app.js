@@ -32,7 +32,7 @@ const reduceMotion=()=>window.matchMedia&&matchMedia('(prefers-reduced-motion: r
 function detectCurrency(){return 'PHP';}
 const fmts={};
 const fmt=c=>fmts[c]||(fmts[c]=new Intl.NumberFormat('en-PH',{style:'currency',currency:c,currencyDisplay:'narrowSymbol'}));
-const state={tx:[],currency:detectCurrency(),
+const state={tx:[],goals:[],entries:[],goalsError:false,currency:detectCurrency(),
   prefs:{name:'',skin:'auto',opening:null,openOn:'dashboard',onboarded:false,customCats:[]},
   view:'dashboard',month:todayStr().slice(0,7),trend:'days',
   filters:{q:'',type:'all',cat:'all',period:'month'},editingId:null};
@@ -177,6 +177,7 @@ async function loadAll(){
   const rows=await fetchAllTx();
   state.tx=rows.map(mapTx).map(cleanTx).filter(Boolean);
   sortTx();
+  await loadGoals();
 }
 async function reloadTx(){
   try{
@@ -400,12 +401,12 @@ function refreshCatUIs(){
 /* ---------- views ---------- */
 function setView(v){
   state.view=v;
-  $('#viewDash').hidden=v!=='dashboard'; $('#viewRecords').hidden=v!=='records'; $('#viewSettings').hidden=v!=='settings';
-  $('#entry').hidden=v==='settings';
-  const vEl={dashboard:$('#viewDash'),records:$('#viewRecords'),settings:$('#viewSettings')}[v];
+  $('#viewDash').hidden=v!=='dashboard'; $('#viewRecords').hidden=v!=='records'; $('#viewSettings').hidden=v!=='settings'; $('#viewSavings').hidden=v!=='savings';
+  $('#entry').hidden=(v==='settings'||v==='savings');
+  const vEl={dashboard:$('#viewDash'),records:$('#viewRecords'),settings:$('#viewSettings'),savings:$('#viewSavings')}[v];
   vEl.classList.remove('enter'); void vEl.offsetWidth; vEl.classList.add('enter');
   document.querySelectorAll('.tabs button').forEach(b=>{if(b.dataset.view===v)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
-  if(v==='dashboard'){playIntro();renderHero();renderCats();drawTrend();} else if(v==='records')renderRecords(); else syncSettingsUI();
+  if(v==='dashboard'){playIntro();renderHero();renderCats();drawTrend();} else if(v==='records')renderRecords(); else if(v==='savings'){playIntro();state.svCount=true;renderSavings();} else syncSettingsUI();
 }
 const monthTx=m=>state.tx.filter(t=>t.date.startsWith(m));
 function totals(list){let e=0,i=0;list.forEach(t=>{if(t.type==='expense')e+=t.amount;else i+=t.amount;});return {exp:r2(e),inc:r2(i)};}
@@ -494,8 +495,8 @@ function drawTrend(){
   const d=trendData();
   $('#caption').textContent=d.caption;
   $('#legend').innerHTML=
-    '<span><svg viewBox="0 0 26 6" aria-hidden="true"><line x1="0" y1="3" x2="26" y2="3" stroke="var(--inc)" stroke-width="3" stroke-dasharray="6 4" stroke-linecap="round"/></svg>Income <b>'+esc(money(d.totInc))+'</b></span>'+
-    '<span><svg viewBox="0 0 26 6" aria-hidden="true"><line x1="0" y1="3" x2="26" y2="3" stroke="var(--exp)" stroke-width="3" stroke-linecap="round"/></svg>Expenses <b>'+esc(money(d.totExp))+'</b></span>';
+    '<span><svg viewBox="0 0 26 6" aria-hidden="true"><line x1="0" y1="3" x2="26" y2="3" stroke="var(--ch-inc)" stroke-width="3" stroke-dasharray="6 4" stroke-linecap="round"/></svg>Income <b>'+esc(money(d.totInc))+'</b></span>'+
+    '<span><svg viewBox="0 0 26 6" aria-hidden="true"><line x1="0" y1="3" x2="26" y2="3" stroke="var(--ch-exp)" stroke-width="3" stroke-linecap="round"/></svg>Expenses <b>'+esc(money(d.totExp))+'</b></span>';
   const any=d.exp.some(v=>v>0)||d.inc.some(v=>v>0);
   if(!any){wrap.innerHTML='<div class="empty"><p>No income or expenses to chart for this range yet.</p></div>';return;}
 
@@ -527,16 +528,17 @@ function drawTrend(){
   const lastI=d.exp.length-1;
   const dotIdx=d.kind==='months'?d.exp.map((_,i)=>i):[lastI];
   dotIdx.forEach(i=>{
-    marks+='<circle cx="'+xAt(i).toFixed(1)+'" cy="'+yAt(d.inc[i]).toFixed(1)+'" r="4" fill="var(--surface)" stroke="var(--inc)" stroke-width="2.2"/>'+
-           '<circle cx="'+xAt(i).toFixed(1)+'" cy="'+yAt(d.exp[i]).toFixed(1)+'" r="4" fill="var(--exp)" stroke="var(--surface)" stroke-width="1.5"/>';
+    marks+='<circle cx="'+xAt(i).toFixed(1)+'" cy="'+yAt(d.inc[i]).toFixed(1)+'" r="4" fill="var(--surface)" stroke="var(--ch-inc)" stroke-width="2.2"/>'+
+           '<circle cx="'+xAt(i).toFixed(1)+'" cy="'+yAt(d.exp[i]).toFixed(1)+'" r="4" fill="var(--ch-exp)" stroke="var(--surface)" stroke-width="1.5"/>';
   });
+  const area=path(d.exp)+' L'+xAt(lastI).toFixed(1)+' '+yAt(0).toFixed(1)+' L'+xAt(0).toFixed(1)+' '+yAt(0).toFixed(1)+' Z';
   const label='Line chart of income and expenses. '+d.caption+' Income '+money(d.totInc)+', expenses '+money(d.totExp)+'.';
   wrap.innerHTML='<svg class="chart" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+esc(label)+'">'+grid+xl+
-    '<g class="lines"><path d="'+path(d.inc)+'" fill="none" stroke="var(--inc)" stroke-width="2.6" stroke-dasharray="7 5" stroke-linecap="round" stroke-linejoin="round"/>'+
-    '<path d="'+path(d.exp)+'" fill="none" stroke="var(--exp)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>'+
+    '<g class="lines"><path class="area" d="'+area+'" fill="var(--ch-exp)" fill-opacity=".1"/><path d="'+path(d.inc)+'" fill="none" stroke="var(--ch-inc)" stroke-width="2.6" stroke-dasharray="7 5" stroke-linecap="round" stroke-linejoin="round"/>'+
+    '<path d="'+path(d.exp)+'" fill="none" stroke="var(--ch-exp)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>'+
     marks+'</g>'+
     '<g id="hov" visibility="hidden"><line id="hovLine" y1="'+T+'" y2="'+(T+ih)+'" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3"/>'+
-    '<circle id="hovI" r="5" fill="var(--surface)" stroke="var(--inc)" stroke-width="2.4"/><circle id="hovE" r="5" fill="var(--exp)" stroke="var(--surface)" stroke-width="1.5"/></g>'+
+    '<circle id="hovI" r="5" fill="var(--surface)" stroke="var(--ch-inc)" stroke-width="2.4"/><circle id="hovE" r="5" fill="var(--ch-exp)" stroke="var(--surface)" stroke-width="1.5"/></g>'+
     '<rect id="hit" x="'+L+'" y="'+T+'" width="'+iw+'" height="'+ih+'" fill="transparent"/></svg><div class="tip" id="tip" hidden></div>';
 
   const svg=wrap.querySelector('svg'), hit=$('#hit'), tip=$('#tip'), hov=$('#hov');
@@ -628,7 +630,7 @@ function accountHTML(withBtn){
 }
 function renderAccount(){
   $('#acct').innerHTML=accountHTML(true); $('#wAccount').innerHTML=accountHTML(false);
-  $('#dataHint').textContent='Everything is saved to your Supabase project. Export a copy any time, or import a CSV from the earlier version of this app.';
+  $('#dataHint').textContent='Everything is saved to your account. Export a copy any time, or import a CSV from the earlier version of this app.';
 }
 function skinPickerHTML(){
   return SKINS.map(s=>'<button type="button" class="skin" role="radio" aria-checked="'+(state.prefs.skin===s.id)+'" data-skin="'+s.id+'">'+
@@ -789,7 +791,7 @@ function settle(){
 
 /* ---------- render ---------- */
 function renderAll(){
-  renderHero(); renderCats(); renderRecords();
+  renderHero(); renderCats(); renderRecords(); renderSavings();
   if(state.view==='dashboard')drawTrend();
   if(state.view==='settings'){renderAccount();renderSkinPickers();renderCatList();}
 }
@@ -905,7 +907,7 @@ async function onSignedIn(session){
     await loadAll(); loaded=true;
     if(!trendTouched)autoTrend();
     syncCurrencyUI(); refreshCatUIs(); playIntro(); setView(state.prefs.openOn); renderAll();
-    subscribe(); setStatus('synced');
+    subscribe(); subscribeGoals(); setStatus('synced');
     settle(); hideBoot();
   }catch(e){
     console.error(e); setStatus('error'); userId=null; account.signedIn=false; hideBoot();
@@ -917,7 +919,8 @@ async function onSignedIn(session){
 function onSignedOut(){
   loaded=false; userId=null; account.signedIn=false; account.email='';
   if(channel&&sb){sb.removeChannel(channel);channel=null;}
-  state.tx=[];
+  state.tx=[]; state.goals=[]; state.entries=[]; state.goalsError=false;
+  if(goalsChannel&&sb){sb.removeChannel(goalsChannel);goalsChannel=null;}
   state.prefs=Object.assign({},state.prefs,{name:'',opening:null,onboarded:false,customCats:[],openOn:'dashboard'});
   rebuildCats(); exitEdit(); settled=false;
   setView('dashboard'); renderAll(); refreshCatUIs();
@@ -938,6 +941,220 @@ function bootAuth(){
   });
 }
 
+/* ---------- savings goals ---------- */
+let goalsChannel=null, goalBusy=false, goalEditId=null, moneyCtx=null;
+const openHist=new Set();
+const mapGoal=r=>({id:r.id,name:r.name,target:Number(r.target),deadline:r.deadline||'',ci:r.color_index,createdAt:Date.parse(r.created_at)||0});
+const mapEntry=r=>({id:r.id,goalId:r.goal_id,amount:Number(r.amount),date:r.date,note:r.note||'',createdAt:Date.parse(r.created_at)||0});
+const savedOf=id=>r2(state.entries.filter(e=>e.goalId===id).reduce((s,e)=>s+e.amount,0));
+const entryRow=e=>{
+  const row={id:e.id,goal_id:e.goalId,amount:e.amount,date:e.date,note:e.note};
+  if(e.createdAt>0)row.created_at=new Date(e.createdAt).toISOString();
+  return row;
+};
+const longDate=ds=>{const [y,m,d]=ds.split('-').map(Number);return new Date(y,m-1,d).toLocaleDateString('en-PH',{day:'numeric',month:'short',year:'numeric'});};
+
+async function loadGoals(){
+  const g=await sb.from('goals').select('id,name,target,deadline,color_index,created_at').order('created_at');
+  if(g.error){
+    if(/relation|schema cache|does not exist|PGRST205|42P01/i.test(g.error.code+' '+g.error.message)){
+      state.goalsError=true; state.goals=[]; state.entries=[]; return;
+    }
+    throw g.error;
+  }
+  const out=[], size=1000;
+  for(let from=0;;from+=size){
+    const {data,error}=await sb.from('goal_entries')
+      .select('id,goal_id,amount,date,note,created_at')
+      .order('date',{ascending:false}).order('created_at',{ascending:false}).order('id')
+      .range(from,from+size-1);
+    if(error)throw error;
+    out.push(...data);
+    if(data.length<size)break;
+  }
+  state.goalsError=false;
+  state.goals=g.data.map(mapGoal);
+  state.entries=out.map(mapEntry);
+}
+async function reloadGoals(){
+  if(goalBusy||!sb)return;
+  try{await loadGoals();scheduleRender();}catch(e){console.error(e);}
+}
+function subscribeGoals(){
+  if(goalsChannel&&sb){sb.removeChannel(goalsChannel);goalsChannel=null;}
+  if(state.goalsError||!sb)return;
+  goalsChannel=sb.channel('finance-tracker-goals-'+userId)
+    .on('postgres_changes',{event:'*',schema:'public',table:'goals'},()=>setTimeout(reloadGoals,250))
+    .on('postgres_changes',{event:'*',schema:'public',table:'goal_entries'},()=>setTimeout(reloadGoals,250))
+    .subscribe();
+}
+
+/* writes (optimistic, rolled back on failure) */
+async function saveGoal(g){
+  const i=state.goals.findIndex(x=>x.id===g.id), prev=i>=0?state.goals[i]:null;
+  if(i>=0)state.goals[i]=g; else state.goals.push(g);
+  renderAll(); goalBusy=true;
+  const ok=await dbRun(sb.from('goals').upsert({id:g.id,name:g.name,target:g.target,deadline:g.deadline||null,color_index:g.ci}));
+  goalBusy=false;
+  if(!ok){
+    const j=state.goals.findIndex(x=>x.id===g.id);
+    if(prev){if(j>=0)state.goals[j]=prev;}else if(j>=0)state.goals.splice(j,1);
+    renderAll(); toast("Couldn't save that goal. Check your connection and try again.");
+  }
+  return ok;
+}
+async function deleteGoal(id){
+  const goal=state.goals.find(g=>g.id===id); if(!goal)return;
+  state.goals=state.goals.filter(g=>g.id!==id);
+  state.entries=state.entries.filter(e=>e.goalId!==id);
+  openHist.delete(id); renderAll(); goalBusy=true;
+  const ok=await dbRun(sb.from('goals').delete().eq('id',id));
+  goalBusy=false;
+  if(!ok){await reloadGoals();toast("Couldn't delete that goal. Check your connection and try again.");return;}
+  toast('Deleted '+goal.name+'.');
+}
+async function addEntry(e){
+  state.entries.push(e); renderAll(); goalBusy=true;
+  const ok=await dbRun(sb.from('goal_entries').insert(entryRow(e)));
+  goalBusy=false;
+  if(!ok){
+    state.entries=state.entries.filter(x=>x.id!==e.id); renderAll();
+    toast("Couldn't save that. Check your connection and try again.");
+  }
+  return ok;
+}
+async function deleteEntry(id){
+  const e=state.entries.find(x=>x.id===id); if(!e)return null;
+  state.entries=state.entries.filter(x=>x.id!==id); renderAll(); goalBusy=true;
+  const ok=await dbRun(sb.from('goal_entries').delete().eq('id',id));
+  goalBusy=false;
+  if(!ok){state.entries.push(e);renderAll();toast("Couldn't remove that entry. Check your connection and try again.");return null;}
+  return e;
+}
+
+/* rendering */
+function goalMeta(g,saved){
+  const left=r2(Math.max(0,g.target-saved)), pct=Math.min(100,Math.floor(saved/g.target*100));
+  const parts=[pct+'% saved'];
+  if(left>0)parts.push(money(left)+' to go');
+  if(g.deadline){
+    const [y,m,d]=g.deadline.split('-').map(Number), due=new Date(y,m-1,d), now=new Date();
+    const days=Math.round((due-new Date(now.getFullYear(),now.getMonth(),now.getDate()))/86400000);
+    parts.push('By '+longDate(g.deadline));
+    if(left>0){
+      if(days<0)parts.push('Past the target date');
+      else parts.push('About '+money(r2(left/Math.max(1,Math.ceil(days/30.4375))))+' a month to get there');
+    }
+  }
+  return parts.join('. ')+'.';
+}
+function goalHTML(g,saved){
+  const done=saved>=g.target, w=Math.min(100,saved/g.target*100), pct=Math.min(100,Math.floor(saved/g.target*100));
+  const hist=state.entries.filter(e=>e.goalId===g.id).sort((a,b)=>a.date===b.date?b.createdAt-a.createdAt:(a.date<b.date?1:-1));
+  const open=openHist.has(g.id);
+  let histHTML='';
+  if(open){
+    histHTML=hist.length?'<ul class="ghist">'+hist.slice(0,20).map(e=>
+      '<li><div class="gh-main"><span>'+esc(longDate(e.date))+'</span>'+(e.note?'<span class="gh-note">'+esc(e.note)+'</span>':'')+'</div>'+
+      '<b class="'+(e.amount>0?'pos':'')+'">'+(e.amount>0?'+':'\u2212')+esc(money(Math.abs(e.amount)))+'</b>'+
+      '<button type="button" class="icon del" data-act="entry-del" data-id="'+esc(e.id)+'" aria-label="Remove this entry" title="Remove">'+ICON_DEL+'</button></li>').join('')+
+      (hist.length>20?'<li><span class="gh-note">And '+(hist.length-20)+' earlier entries.</span></li>':'')+'</ul>'
+      :'<ul class="ghist"><li><span class="gh-note">No money added yet.</span></li></ul>';
+  }
+  return '<article class="goal'+(done?' done':'')+'" data-id="'+esc(g.id)+'">'+
+    '<div class="g-top"><span class="dot" style="background:var(--u'+g.ci+')"></span><h3>'+esc(g.name)+'</h3>'+(done?'<span class="badge">Goal reached</span>':'')+'</div>'+
+    '<p class="g-amt"><b>'+esc(money(saved))+'</b> of '+esc(money(g.target))+'</p>'+
+    '<div class="gbar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+pct+'" aria-label="'+esc(g.name)+' progress"><span style="width:'+(saved>0?Math.max(2,w):0).toFixed(1)+'%;background:'+(done?'var(--inc)':'var(--u'+g.ci+')')+'"></span></div>'+
+    '<p class="g-meta">'+esc(goalMeta(g,saved))+'</p>'+
+    '<div class="g-actions"><button type="button" class="secondary" data-act="goal-add">Add money</button>'+
+    '<button type="button" class="linkbtn" data-act="goal-withdraw"'+(saved>0?'':' disabled')+'>Withdraw</button>'+
+    '<button type="button" class="linkbtn" data-act="goal-history" aria-expanded="'+open+'">'+(open?'Hide history':'History')+'</button>'+
+    '<button type="button" class="linkbtn" data-act="goal-edit">Edit</button>'+
+    '<button type="button" class="linkbtn danger" data-act="goal-delete">Delete</button></div>'+histHTML+'</article>';
+}
+function renderSavings(){
+  const box=$('#goals'); if(!box)return;
+  const tot=$('#svTotal');
+  if(state.goalsError){
+    cancelAnimationFrame(tot._raf); tot.textContent=money(0); $('#svSub').textContent='';
+    box.innerHTML='<div class="empty gwide"><p>Savings goals are not set up in your database yet.</p><p>Run <span class="code">supabase/update-02-savings-goals.sql</span> in the Supabase SQL Editor, then reload this page.</p></div>';
+    return;
+  }
+  const rows=state.goals.map(g=>({g,saved:savedOf(g.id)}));
+  rows.sort((a,b)=>{
+    const da=a.saved>=a.g.target?1:0, db=b.saved>=b.g.target?1:0; if(da!==db)return da-db;
+    const x=a.g.deadline||'9999-99-99', y=b.g.deadline||'9999-99-99'; if(x!==y)return x<y?-1:1;
+    return a.g.createdAt-b.g.createdAt;
+  });
+  const totalSaved=r2(rows.reduce((s,r)=>s+r.saved,0)), totalTarget=r2(rows.reduce((s,r)=>s+r.g.target,0));
+  if(state.svCount){state.svCount=false;animateMoney(tot,totalSaved);}
+  else{cancelAnimationFrame(tot._raf);tot.textContent=money(totalSaved);}
+  const reached=rows.filter(r=>r.saved>=r.g.target).length;
+  $('#svSub').textContent=rows.length
+    ?rows.length+' goal'+(rows.length===1?'':'s')+', '+reached+' reached. '+money(totalTarget)+' in total targets.'
+    :'Nothing saved yet.';
+  box.innerHTML=rows.length?rows.map(r=>goalHTML(r.g,r.saved)).join('')
+    :'<div class="empty gwide"><p>No savings goals yet.</p><p>Set one, like an emergency fund or a trip, then add money as you save.</p><button type="button" class="primary" data-act="goal-new">Create your first goal</button></div>';
+}
+
+/* dialogs */
+function openDlg(d){if(typeof d.showModal==='function')d.showModal();else d.setAttribute('open','');}
+function closeDlg(d){if(typeof d.close==='function')d.close();else d.removeAttribute('open');}
+function openGoalDlg(id){
+  if(state.goalsError){toast('Run the savings SQL in Supabase first.');return;}
+  const g=id?state.goals.find(x=>x.id===id):null;
+  goalEditId=g?g.id:null;
+  $('#gdTitle').textContent=g?'Edit goal':'New goal';
+  $('#gSave').textContent=g?'Save changes':'Create goal';
+  $('#gName').value=g?g.name:''; $('#gTarget').value=g?String(g.target):''; $('#gDate').value=g?g.deadline:'';
+  document.querySelectorAll('input[name="gc"]').forEach(r=>{r.checked=+r.value===(g?g.ci:1);});
+  $('#gErr').textContent='';
+  openDlg($('#goalDlg')); setTimeout(()=>$('#gName').focus(),30);
+}
+function onGoalSubmit(e){
+  e.preventDefault();
+  const err=$('#gErr'), name=$('#gName').value.trim().slice(0,40);
+  const raw=$('#gTarget').value.trim().replace(/,/g,''), date=$('#gDate').value;
+  const picked=document.querySelector('input[name="gc"]:checked'), ci=picked?+picked.value:1;
+  if(!name){err.textContent='Give your goal a name.';$('#gName').focus();return;}
+  if(!raw||!/^(\d+\.?\d*|\.\d+)$/.test(raw)||parseFloat(raw)<=0){err.textContent='Enter a target amount greater than zero, using numbers only.';$('#gTarget').focus();return;}
+  const target=r2(parseFloat(raw));
+  if(target>1e12){err.textContent='That target is too large.';$('#gTarget').focus();return;}
+  if(date&&!/^\d{4}-\d{2}-\d{2}$/.test(date)){err.textContent='Pick a valid target date, or leave it blank.';$('#gDate').focus();return;}
+  const old=goalEditId&&state.goals.find(x=>x.id===goalEditId);
+  const g={id:old?old.id:uid(),name,target,deadline:date||'',ci,createdAt:old?old.createdAt:Date.now()};
+  closeDlg($('#goalDlg'));
+  saveGoal(g).then(ok=>{if(ok)toast(old?'Goal updated.':'Goal created. Add your first savings to get started.');});
+}
+function openMoneyDlg(goalId,mode){
+  const g=state.goals.find(x=>x.id===goalId); if(!g)return;
+  moneyCtx={goalId,mode};
+  const saved=savedOf(goalId);
+  $('#mdTitle').textContent=(mode==='withdraw'?'Withdraw from ':'Add to ')+g.name;
+  $('#mdHint').textContent='Saved so far: '+money(saved)+' of '+money(g.target)+'.';
+  $('#mSave').textContent=mode==='withdraw'?'Withdraw':'Add money';
+  $('#mAmount').value=''; $('#mNote').value=''; $('#mDate').value=todayStr(); $('#mErr').textContent='';
+  openDlg($('#moneyDlg')); setTimeout(()=>$('#mAmount').focus(),30);
+}
+function onMoneySubmit(e){
+  e.preventDefault();
+  if(!moneyCtx)return;
+  const err=$('#mErr'), raw=$('#mAmount').value.trim().replace(/,/g,''), date=$('#mDate').value;
+  if(!raw||!/^(\d+\.?\d*|\.\d+)$/.test(raw)||parseFloat(raw)<=0){err.textContent='Enter an amount greater than zero, using numbers only.';$('#mAmount').focus();return;}
+  const amt=r2(parseFloat(raw));
+  if(amt>1e12){err.textContent='That amount is too large.';return;}
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){err.textContent='Pick a date.';$('#mDate').focus();return;}
+  const g=state.goals.find(x=>x.id===moneyCtx.goalId); if(!g){closeDlg($('#moneyDlg'));return;}
+  const before=savedOf(g.id), w=moneyCtx.mode==='withdraw';
+  if(w&&amt>before){err.textContent='You only have '+money(before)+' saved in this goal.';$('#mAmount').focus();return;}
+  closeDlg($('#moneyDlg'));
+  addEntry({id:uid(),goalId:g.id,amount:w?-amt:amt,date,note:$('#mNote').value.trim().slice(0,80),createdAt:Date.now()}).then(ok=>{
+    if(!ok)return;
+    if(!w&&before<g.target&&before+amt>=g.target)toast('You reached your goal: '+g.name+'!');
+    else toast((w?'Withdrew ':'Added ')+money(amt)+(w?' from ':' to ')+g.name+'.');
+  });
+}
+
 /* ---------- loading screen + motion ---------- */
 let bootShownAt=Date.now(), bootTimer=null, playTimer=null;
 function showBoot(){
@@ -955,7 +1172,7 @@ function hideBoot(){
 }
 function playIntro(){            // bars grow, lines rise, hero number counts up
   if(reduceMotion())return;
-  const els=[$('#cats'),$('#chartWrap')];
+  const els=[$('#cats'),$('#chartWrap'),$('#goals')];
   els.forEach(e=>e.classList.add('play'));
   state.countUp=true;
   clearTimeout(playTimer);
@@ -977,6 +1194,7 @@ function animateMoney(el,to){
 function init(){
   loadSkinCache(); rebuildCats(); applySkin(); wireAuth();
   $('.sw').innerHTML=[1,2,3,4,5,6,7,8].map(i=>'<label><input type="radio" name="cc" value="'+i+'"'+(i===1?' checked':'')+' aria-label="Color '+i+'"><span style="background:var(--u'+i+')"></span></label>').join('');
+  $('#gSw').innerHTML=[1,2,3,4,5,6,7,8].map(i=>'<label><input type="radio" name="gc" value="'+i+'"'+(i===1?' checked':'')+' aria-label="Color '+i+'"><span style="background:var(--u'+i+')"></span></label>').join('');
   fillCategories('expense'); fillFilterCats(); syncFilterUI(); syncCurrencyUI();
   $('#date').value=todayStr();
 
@@ -1016,6 +1234,9 @@ function init(){
     $('#sMoneyErr').textContent=''; state.prefs.opening=v; saveSettings();
   });
   $('#catForm').addEventListener('submit',addCustomCat);
+  $('#goalForm').addEventListener('submit',onGoalSubmit);
+  $('#moneyForm').addEventListener('submit',onMoneySubmit);
+  document.querySelectorAll('dialog').forEach(d=>d.addEventListener('click',e=>{if(e.target===d)closeDlg(d);}));
   $('#importFile').addEventListener('change',e=>{const f=e.target.files&&e.target.files[0];e.target.value='';if(f)importCsv(f);});
   document.addEventListener('click',e=>{
     const s=e.target.closest('.skin'); if(s){pickSkin(s.dataset.skin);return;}
@@ -1024,6 +1245,13 @@ function init(){
     if(act==='sample')loadSample();
     else if(act==='clear-filters'){state.filters={q:'',type:'all',cat:'all',period:'month'};syncFilterUI();renderRecords();}
     else if(act==='export')exportCsv();
+    else if(act==='goal-new')openGoalDlg(null);
+    else if(act==='dlg-cancel')closeDlg(a.closest('dialog'));
+    else if(act==='goal-add'||act==='goal-withdraw')openMoneyDlg(a.closest('.goal').dataset.id,act==='goal-add'?'deposit':'withdraw');
+    else if(act==='goal-edit')openGoalDlg(a.closest('.goal').dataset.id);
+    else if(act==='goal-delete'){const gid=a.closest('.goal').dataset.id;confirmTap(a,'Click again to delete',()=>deleteGoal(gid));}
+    else if(act==='goal-history'){const gid=a.closest('.goal').dataset.id;if(openHist.has(gid))openHist.delete(gid);else openHist.add(gid);renderSavings();}
+    else if(act==='entry-del'){deleteEntry(a.dataset.id).then(e=>{if(e)toast('Entry removed.','Undo',()=>addEntry(e));});}
     else if(act==='replay')openWelcome(false);
     else if(act==='import')$('#importFile').click();
     else if(act==='signout'){if(sb)sb.auth.signOut();}
