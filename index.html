@@ -25,6 +25,7 @@
     <nav class="tabs" aria-label="Views">
       <button type="button" data-view="dashboard" aria-current="page">Dashboard</button>
       <button type="button" data-view="records">Transactions</button>
+      <button type="button" data-view="savings">Savings</button>
       <button type="button" data-view="settings">Settings</button>
     </nav>
   </header>
@@ -113,6 +114,18 @@
       <div id="recList"></div>
     </section>
 
+    <section id="viewSavings" aria-label="Savings" hidden>
+      <div class="sv-head">
+        <div>
+          <p class="hero-label">Total saved</p>
+          <p class="hero-num" id="svTotal">0</p>
+          <p class="hero-delta" id="svSub"></p>
+        </div>
+        <button type="button" class="primary" data-act="goal-new">New goal</button>
+      </div>
+      <div class="goals" id="goals"></div>
+    </section>
+
     <section id="viewSettings" aria-label="Settings" hidden>
       <div class="set">
         <section class="panel" aria-labelledby="sProfileH">
@@ -186,6 +199,7 @@
       <li>Log a transaction in a few seconds.</li>
       <li>Read your month on the dashboard.</li>
       <li>Fix mistakes from the Transactions tab.</li>
+      <li>Set savings goals and watch them fill up.</li>
     </ul>
     <div class="acct" id="wAccount"></div>
     <div class="wform">
@@ -231,6 +245,34 @@
     <p class="lead" id="setupMsg"></p>
   </div>
 </div>
+
+<dialog id="goalDlg" aria-labelledby="gdTitle">
+  <form class="dlg-in" id="goalForm" novalidate autocomplete="off">
+    <h2 id="gdTitle">New goal</h2>
+    <div class="fields">
+      <label class="f"><span>Goal name</span><input class="inp" type="text" id="gName" maxlength="40" placeholder="e.g. Emergency fund"></label>
+      <label class="f"><span>Target amount</span><div class="money"><i>&#8369;</i><input id="gTarget" inputmode="decimal" placeholder="0.00"></div></label>
+      <label class="f"><span>Target date (optional)</span><input class="inp" type="date" id="gDate"></label>
+      <div class="f"><span class="lbl" id="gColLbl">Color</span><div class="sw" id="gSw" role="radiogroup" aria-labelledby="gColLbl"></div></div>
+    </div>
+    <p class="err" id="gErr" role="alert"></p>
+    <div class="wact"><button class="primary" type="submit" id="gSave">Create goal</button><button class="linkbtn" type="button" data-act="dlg-cancel">Cancel</button></div>
+  </form>
+</dialog>
+
+<dialog id="moneyDlg" aria-labelledby="mdTitle">
+  <form class="dlg-in" id="moneyForm" novalidate autocomplete="off">
+    <h2 id="mdTitle">Add money</h2>
+    <p class="hint" id="mdHint"></p>
+    <div class="fields">
+      <label class="f"><span>Amount</span><div class="money"><i>&#8369;</i><input id="mAmount" inputmode="decimal" placeholder="0.00"></div></label>
+      <label class="f"><span>Date</span><input class="inp" type="date" id="mDate"></label>
+      <label class="f"><span>Note (optional)</span><input class="inp" type="text" id="mNote" maxlength="80" placeholder="e.g. Bonus"></label>
+    </div>
+    <p class="err" id="mErr" role="alert"></p>
+    <div class="wact"><button class="primary" type="submit" id="mSave">Add money</button><button class="linkbtn" type="button" data-act="dlg-cancel">Cancel</button></div>
+  </form>
+</dialog>
 
 <div class="toastwrap"><div class="toast" id="toast" role="status" aria-live="polite"></div></div>
 
