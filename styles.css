@@ -377,3 +377,20 @@ dialog[open]{animation:cardIn .3s cubic-bezier(.2,.7,.2,1) both}
 .dlg-in .roll-rows .inp{height:40px}
 :root[data-skin="coquette"] .notice,:root[data-skin="coquette"] .b-sum,:root[data-skin="coquette"] .warn{border-radius:20px}
 @media (max-width:520px){.b-inputs{grid-template-columns:1fr}.b-head .primary{padding:0 16px}}
+
+/* ---------- Budget pie chart ---------- */
+.b-grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:20px;align-items:start}
+.pie-wrap{display:grid;grid-template-columns:200px minmax(0,1fr);gap:22px;align-items:center;margin-top:10px}
+.pie-svg{position:relative;width:200px;height:200px}
+.pie-svg svg{display:block;width:200px;height:200px;overflow:visible}
+.pie-svg path,.pie-svg circle{stroke:var(--surface);stroke-width:2;stroke-linejoin:round;transition:transform .18s ease,filter .18s ease}
+.pie-svg .hot{filter:brightness(1.08)}
+.pie-legend{list-style:none;margin:0;padding:0;display:grid;gap:2px;min-width:0}
+.pie-legend li{display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:10px;font-size:14px;transition:background-color .15s ease}
+.pie-legend li.hot{background:var(--track)}
+.pie-legend li.gh-note{display:block;font-size:14px}
+.pie-legend b{font-weight:600}
+@keyframes pieIn{from{opacity:0;transform:rotate(-70deg) scale(.7)}to{opacity:1;transform:none}}
+#bPie.play .pie-svg svg{animation:pieIn .8s cubic-bezier(.2,.8,.2,1) both}
+@media (max-width:900px){.b-grid{grid-template-columns:1fr}}
+@media (max-width:520px){.pie-wrap{grid-template-columns:1fr;justify-items:center}.pie-legend{width:100%}}
