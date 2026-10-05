@@ -25,6 +25,7 @@
     <nav class="tabs" aria-label="Views">
       <button type="button" data-view="dashboard" aria-current="page">Dashboard</button>
       <button type="button" data-view="records">Transactions</button>
+      <button type="button" data-view="budget">Budget</button>
       <button type="button" data-view="savings">Savings</button>
       <button type="button" data-view="settings">Settings</button>
     </nav>
@@ -49,6 +50,7 @@
       <label class="f"><span>Date</span><input class="inp" type="date" id="date"></label>
       <label class="f note"><span>Note (optional)</span><input class="inp" type="text" id="note" maxlength="80" placeholder="What was it for?"></label>
       <button class="primary" id="saveBtn" type="submit">Save</button>
+      <div class="f bcatf" id="bcatField" hidden><label class="f"><span>Budget category (optional)</span><select class="inp" id="bcat"></select></label><p class="bhint" id="bcatHint"></p></div>
     </form>
     <p class="err" id="formErr" role="alert"></p>
   </section>
@@ -112,6 +114,39 @@
       </div>
       <p class="sum" id="recSum"></p>
       <div id="recList"></div>
+    </section>
+
+    <section id="viewBudget" aria-label="Budget" hidden>
+      <div class="monthbar">
+        <button type="button" class="circ" id="bPrev" aria-label="Previous month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
+        <h1 id="bLabel"></h1>
+        <button type="button" class="circ" id="bNext" aria-label="Next month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg></button>
+        <button type="button" class="linkbtn" id="bThis">Back to this month</button>
+      </div>
+      <div class="notice" id="rollNotice" hidden></div>
+      <section class="panel" id="bPlan" aria-labelledby="bPlanH">
+        <h2 id="bPlanH">Your month</h2>
+        <p class="hint">Type your income, choose how much goes to savings, then decide how to share the rest.</p>
+        <div class="b-inputs">
+          <label class="f"><span>Income this month</span><div class="money"><i>&#8369;</i><input id="bIncome" inputmode="decimal" placeholder="0.00"></div></label>
+          <label class="f"><span>Savings (% of income)</span><div class="money"><input id="bPct" inputmode="decimal" placeholder="0"><i>%</i></div></label>
+        </div>
+        <div class="f b-split">
+          <span class="lbl" id="bSplitLbl">How to split your budget</span>
+          <div class="toggle" id="bSplit" role="group" aria-labelledby="bSplitLbl">
+            <button type="button" data-split="p404020" aria-pressed="false">40 / 40 / 20</button>
+            <button type="button" data-split="p503020" aria-pressed="false">50 / 30 / 20</button>
+            <button type="button" data-split="custom" aria-pressed="true">My own split</button>
+          </div>
+          <p class="hint" id="bSplitHint"></p>
+        </div>
+        <p class="err" id="bPlanErr" role="alert"></p>
+        <dl class="b-sum" id="bSum"></dl>
+        <div class="warn" id="bWarn" role="status" hidden></div>
+        <div class="btnrow" style="margin-top:12px"><button type="button" class="secondary" data-act="b-copy" id="bCopy" hidden></button></div>
+      </section>
+      <div class="b-head" id="bHead"><h2>Budget categories</h2><button type="button" class="primary" data-act="bcat-new">New category</button></div>
+      <div class="goals" id="bcats"></div>
     </section>
 
     <section id="viewSavings" aria-label="Savings" hidden>
@@ -199,6 +234,7 @@
       <li>Log a transaction in a few seconds.</li>
       <li>Read your month on the dashboard.</li>
       <li>Fix mistakes from the Transactions tab.</li>
+      <li>Plan a budget and see what is left in each category.</li>
       <li>Set savings goals and watch them fill up.</li>
     </ul>
     <div class="acct" id="wAccount"></div>
@@ -245,6 +281,27 @@
     <p class="lead" id="setupMsg"></p>
   </div>
 </div>
+
+<dialog id="bcatDlg" aria-labelledby="bdTitle">
+  <form class="dlg-in" id="bcatForm" novalidate autocomplete="off">
+    <h2 id="bdTitle">New budget category</h2>
+    <div class="fields">
+      <label class="f"><span>Name</span><input class="inp" type="text" id="bName" maxlength="30" placeholder="e.g. Transportation"></label>
+      <div class="f"><span class="lbl" id="bColLbl">Color</span><div class="sw" id="bSw" role="radiogroup" aria-labelledby="bColLbl"></div></div>
+    </div>
+    <p class="err" id="bErr" role="alert"></p>
+    <div class="wact"><button class="primary" type="submit" id="bdSave">Create category</button><button class="linkbtn" type="button" data-act="dlg-cancel">Cancel</button></div>
+  </form>
+</dialog>
+
+<dialog id="rollDlg" aria-labelledby="rollTitle">
+  <div class="dlg-in">
+    <h2 id="rollTitle">Unspent budget</h2>
+    <p class="hint">Choose what happens to each leftover. Nothing moves until you press Apply.</p>
+    <div class="roll-rows" id="rollRows"></div>
+    <div class="wact"><button class="primary" type="button" id="rollApply">Apply</button><button class="linkbtn" type="button" data-act="dlg-cancel">Decide later</button></div>
+  </div>
+</dialog>
 
 <dialog id="goalDlg" aria-labelledby="gdTitle">
   <form class="dlg-in" id="goalForm" novalidate autocomplete="off">
