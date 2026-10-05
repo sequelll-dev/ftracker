@@ -32,7 +32,7 @@ const reduceMotion=()=>window.matchMedia&&matchMedia('(prefers-reduced-motion: r
 function detectCurrency(){return 'PHP';}
 const fmts={};
 const fmt=c=>fmts[c]||(fmts[c]=new Intl.NumberFormat('en-PH',{style:'currency',currency:c,currencyDisplay:'narrowSymbol'}));
-const state={tx:[],goals:[],entries:[],goalsError:false,budget:{cats:[],plans:{},alloc:{}},budgetError:false,currency:detectCurrency(),
+const state={tx:[],goals:[],entries:[],goalsError:false,budget:{cats:[],plans:{},alloc:{}},budgetError:false,pieMode:'plan',currency:detectCurrency(),
   prefs:{name:'',skin:'auto',opening:null,openOn:'dashboard',onboarded:false,customCats:[]},
   view:'dashboard',month:todayStr().slice(0,7),trend:'days',
   filters:{q:'',type:'all',cat:'all',period:'month'},editingId:null};
@@ -1481,7 +1481,7 @@ function renderBudget(){
   $('#bLabel').textContent=monthName(m);
   $('#bThis').hidden=m===curYM();
   const err=state.budgetError, box=$('#bcats');
-  $('#bPlan').hidden=err; $('#bHead').hidden=err;
+  $('#bPlan').hidden=err; $('#bPie').hidden=err; $('#bHead').hidden=err;
   if(err){
     $('#rollNotice').hidden=true;
     box.innerHTML='<div class="empty gwide"><p>Budgeting is not set up in your database yet.</p><p>Run <span class="code">supabase/update-03-budget.sql</span> in the Supabase SQL Editor, then reload this page.</p></div>';
@@ -1505,6 +1505,7 @@ function renderBudget(){
   if(over)msg='Your category shares add up to '+n.sumPct+'%, which is '+(n.sumPct-100)+'% more than your whole budget. Lower some shares.';
   else if(!n.income&&n.sumPct>0)msg='Type your income for '+monthName(m,{month:'long'})+' to turn these shares into amounts.';
   warn.textContent=msg; warn.hidden=!msg;
+  renderPie(m);
   const hasData=!!p||Object.keys(state.budget.alloc[m]||{}).length>0;
   const P=addM(m,-1), canCopy=!hasData&&(!!planOf(P)||Object.keys(state.budget.alloc[P]||{}).length>0);
   $('#bCopy').hidden=!canCopy;
@@ -1541,6 +1542,76 @@ function onBcatSubmit(e){
   });
 }
 
+/* ---------- budget pie chart ---------- */
+function pieData(m){
+  const mn=monthName(m,{month:'long'});
+  if(state.pieMode==='spent'){
+    const items=sortedCats().map(c=>({name:c.name,color:'var(--u'+c.ci+')',value:spentIn(m,c.id)}));
+    const other=r2(state.tx.filter(t=>t.type==='expense'&&!t.budgetCat&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0));
+    if(other>0)items.push({name:'No budget category',color:'var(--c-other)',value:other});
+    return {items:items.filter(x=>x.value>0),caption:'What you spent in '+mn+', by budget category.',empty:'No expenses logged in '+mn+' yet.'};
+  }
+  const n=planNumbers(m), items=[];
+  if(n.savings>0)items.push({name:'Savings',color:'var(--ch-inc)',value:n.savings});
+  sortedCats().forEach(c=>{const v=allocAmount(m,c.id);if(v>0)items.push({name:c.name,color:'var(--u'+c.ci+')',value:v});});
+  const rest=r2(n.pool-n.given);
+  if(rest>0.004)items.push({name:'Not shared yet',color:'var(--track)',value:rest,faint:true});
+  return {items,
+    caption:'How your '+money(n.income)+' income for '+mn+' is shared out.'+(n.sumPct>100.0001?' Your category shares add up to more than 100%, so the slices are shown relative to each other.':''),
+    empty:'Type your income for '+mn+' to see how it is shared out.'};
+}
+function slicePath(a0,a1,r){
+  const x=a=>(100+r*Math.cos(a)).toFixed(2), y=a=>(100+r*Math.sin(a)).toFixed(2);
+  return 'M100 100 L'+x(a0)+' '+y(a0)+' A'+r+' '+r+' 0 '+((a1-a0)>Math.PI?1:0)+' 1 '+x(a1)+' '+y(a1)+' Z';
+}
+function renderPie(m){
+  document.querySelectorAll('#bPie [data-pie]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.pie===state.pieMode)));
+  const d=pieData(m), box=$('#bPieSvg'), leg=$('#bPieLegend');
+  if(!d.items.length){
+    $('#bPieCap').textContent=''; box.innerHTML=''; box.hidden=true;
+    leg.innerHTML='<li class="gh-note">'+esc(d.empty)+'</li>'; return;
+  }
+  $('#bPieCap').textContent=d.caption; box.hidden=false;
+  const total=d.items.reduce((s,x)=>s+x.value,0); let a=-Math.PI/2;
+  const slices=d.items.map((it,i)=>{
+    const frac=it.value/total, a0=a, a1=a+frac*2*Math.PI; a=a1; const am=(a0+a1)/2;
+    return Object.assign({},it,{i,frac,a0,a1,dx:Math.cos(am)*5,dy:Math.sin(am)*5});
+  });
+  const pctText=f=>f>0&&f<0.01?'<1%':Math.round(f*100)+'%';
+  const shapes=slices.length===1
+    ?'<circle data-i="0" cx="100" cy="100" r="92" style="fill:'+slices[0].color+'"/>'
+    :slices.map(s=>'<path data-i="'+s.i+'" d="'+slicePath(s.a0,s.a1,92)+'" style="fill:'+s.color+'"/>').join('');
+  const label='Pie chart. '+slices.map(s=>s.name+' '+money(s.value)+', '+pctText(s.frac)).join('; ')+'.';
+  box.innerHTML='<svg viewBox="0 0 200 200" role="img" aria-label="'+esc(label)+'">'+shapes+'</svg><div class="tip" hidden></div>';
+  leg.innerHTML=slices.map(s=>
+    '<li data-i="'+s.i+'"><span class="dot" style="background:'+s.color+(s.faint?';box-shadow:inset 0 0 0 1px var(--line)':'')+'"></span><span class="cl-name">'+esc(s.name)+'</span><b>'+esc(money(s.value))+'</b><span class="cat-pct">'+pctText(s.frac)+'</span></li>').join('');
+  const tip=box.querySelector('.tip');
+  const hot=(i,on)=>{
+    box.querySelectorAll('[data-i]').forEach(el=>{
+      const k=+el.dataset.i, me=on&&k===i;
+      el.classList.toggle('hot',me); el.style.transform=me?'translate('+slices[k].dx.toFixed(1)+'px,'+slices[k].dy.toFixed(1)+'px)':'';
+    });
+    leg.querySelectorAll('li[data-i]').forEach(li=>li.classList.toggle('hot',on&&+li.dataset.i===i));
+    if(!on)tip.hidden=true;
+  };
+  box.querySelectorAll('[data-i]').forEach(el=>{
+    const i=+el.dataset.i, s=slices[i];
+    const show=ev=>{
+      hot(i,true);
+      const r=box.getBoundingClientRect();
+      tip.innerHTML='<b>'+esc(s.name)+'</b>'+esc(money(s.value))+' ('+pctText(s.frac)+')';
+      tip.hidden=false;
+      tip.style.left=Math.max(0,ev.clientX-r.left+12)+'px'; tip.style.top=(ev.clientY-r.top+12)+'px';
+    };
+    el.addEventListener('pointerenter',show); el.addEventListener('pointermove',show);
+    el.addEventListener('pointerleave',()=>hot(i,false)); el.addEventListener('pointercancel',()=>hot(i,false));
+  });
+  leg.querySelectorAll('li[data-i]').forEach(li=>{
+    const i=+li.dataset.i;
+    li.addEventListener('mouseenter',()=>hot(i,true)); li.addEventListener('mouseleave',()=>hot(i,false));
+  });
+}
+
 function wireBudget(){
   $('#bSw').innerHTML=[1,2,3,4,5,6,7,8].map(i=>'<label><input type="radio" name="bc" value="'+i+'"'+(i===1?' checked':'')+' aria-label="Color '+i+'"><span style="background:var(--u'+i+')"></span></label>').join('');
   $('#bPrev').addEventListener('click',()=>{state.month=addM(state.month,-1);playIntro();renderAll();});
@@ -1566,6 +1637,7 @@ function wireBudget(){
     saveShare(state.month,id,v===null?0:v);
   });
   $('#bcatForm').addEventListener('submit',onBcatSubmit);
+  $('#bPie').addEventListener('click',e=>{const b=e.target.closest('[data-pie]');if(b){state.pieMode=b.dataset.pie;renderBudget();}});
   $('#rollApply').addEventListener('click',applyRollover);
   $('#bcat').addEventListener('change',updateBudgetHint);
   $('#date').addEventListener('change',updateBudgetHint);
@@ -1588,7 +1660,7 @@ function hideBoot(){
 }
 function playIntro(){            // bars grow, lines rise, hero number counts up
   if(reduceMotion())return;
-  const els=[$('#cats'),$('#chartWrap'),$('#goals'),$('#bcats')];
+  const els=[$('#cats'),$('#chartWrap'),$('#goals'),$('#bcats'),$('#bPie')];
   els.forEach(e=>e.classList.add('play'));
   state.countUp=true;
   clearTimeout(playTimer);
