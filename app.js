@@ -32,7 +32,7 @@ const reduceMotion=()=>window.matchMedia&&matchMedia('(prefers-reduced-motion: r
 function detectCurrency(){return 'PHP';}
 const fmts={};
 const fmt=c=>fmts[c]||(fmts[c]=new Intl.NumberFormat('en-PH',{style:'currency',currency:c,currencyDisplay:'narrowSymbol'}));
-const state={tx:[],goals:[],entries:[],goalsError:false,currency:detectCurrency(),
+const state={tx:[],goals:[],entries:[],goalsError:false,budget:{cats:[],plans:{},alloc:{}},budgetError:false,currency:detectCurrency(),
   prefs:{name:'',skin:'auto',opening:null,openOn:'dashboard',onboarded:false,customCats:[]},
   view:'dashboard',month:todayStr().slice(0,7),trend:'days',
   filters:{q:'',type:'all',cat:'all',period:'month'},editingId:null};
@@ -110,13 +110,15 @@ function cleanTx(t){
   if(typeof t.date!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(t.date))return null;
   const type=t.type==='income'?'income':'expense';
   const category=(CAT[t.category]&&CAT[t.category].type===type)?t.category:(type==='income'?'otherinc':'other');
-  return {id:String(t.id||uid()),type,category,amount:r2(amount),date:t.date,note:String(t.note||'').slice(0,80),createdAt:Number(t.createdAt)||0};
+  return {id:String(t.id||uid()),type,category,amount:r2(amount),date:t.date,note:String(t.note||'').slice(0,80),createdAt:Number(t.createdAt)||0,budgetCat:String(t.budgetCat||'')};
 }
 const sortTx=()=>state.tx.sort((a,b)=>a.date===b.date?b.createdAt-a.createdAt:(a.date<b.date?1:-1));
-const mapTx=r=>({id:r.id,type:r.type,category:r.category,amount:Number(r.amount),date:r.date,note:r.note||'',createdAt:Date.parse(r.created_at)||0});
+const mapTx=r=>({id:r.id,type:r.type,category:r.category,amount:Number(r.amount),date:r.date,note:r.note||'',createdAt:Date.parse(r.created_at)||0,budgetCat:r.budget_category_id||''});
+let txHasBudgetCol=true;
 const txRow=t=>{
   const row={id:t.id,type:t.type,category:t.category,amount:t.amount,date:t.date,note:t.note};
   if(t.createdAt>0)row.created_at=new Date(t.createdAt).toISOString();
+  if(txHasBudgetCol)row.budget_category_id=t.budgetCat||null;
   return row;
 };
 const catToPref=r=>({id:r.id,label:r.label,type:r.type,ci:r.color_index});
@@ -149,11 +151,15 @@ function scheduleRender(){
 async function fetchAllTx(){
   const out=[], size=1000;
   for(let from=0;;from+=size){
-    const {data,error}=await sb.from('transactions')
-      .select('id,type,category,amount,date,note,created_at')
+    const cols='id,type,category,amount,date,note,created_at'+(txHasBudgetCol?',budget_category_id':'');
+    const {data,error}=await sb.from('transactions').select(cols)
       .order('date',{ascending:false}).order('created_at',{ascending:false}).order('id')
       .range(from,from+size-1);
-    if(error)throw error;
+    if(error){
+      // the database has not had update-03-budget.sql run yet: keep working without budgets
+      if(txHasBudgetCol&&/42703|budget_category_id/i.test(error.code+' '+error.message)){txHasBudgetCol=false;from-=size;continue;}
+      throw error;
+    }
     out.push(...data);
     if(data.length<size)break;
   }
@@ -178,6 +184,7 @@ async function loadAll(){
   state.tx=rows.map(mapTx).map(cleanTx).filter(Boolean);
   sortTx();
   await loadGoals();
+  await loadBudget();
 }
 async function reloadTx(){
   try{
@@ -347,7 +354,9 @@ function enterEdit(id){
   const t=state.tx.find(x=>x.id===id); if(!t)return;
   state.editingId=id;
   setType(t.type); fillCategories(t.type,t.category);
+  syncBudgetField(); $('#bcat').value=t.budgetCat||'';
   $('#amount').value=String(t.amount); $('#date').value=t.date; $('#note').value=t.note;
+  updateBudgetHint();
   $('#entry').classList.add('editing');
   $('#entryTitle').textContent='Edit transaction';
   $('#saveBtn').textContent='Save changes';
@@ -376,7 +385,8 @@ function onSubmit(e){
   lastCat[type]=category;
   const note=$('#note').value.trim().slice(0,80);
   const editing=state.editingId&&state.tx.find(x=>x.id===state.editingId);
-  const t={id:editing?editing.id:uid(),type,category,amount,date,note,createdAt:editing?editing.createdAt:Date.now()};
+  const budgetCat=type==='expense'?$('#bcat').value:'';
+  const t={id:editing?editing.id:uid(),type,category,amount,date,note,budgetCat,createdAt:editing?editing.createdAt:Date.now()};
   upsert(t);
   const label=(type==='income'?'Income ':'Expense ')+money(amount);
   const m=date.slice(0,7);
@@ -387,6 +397,8 @@ function onSubmit(e){
     if(m!==state.month)toast(label+' saved to '+monthName(m)+'.','View',()=>{state.month=m;setView('dashboard');renderAll();});
     else toast(label+' saved.');
   }
+  const over=budgetOver(t);
+  if(over)toast('Saved, but you are '+money(over.by)+' over budget in '+over.name+'.');
 }
 function refreshCatUIs(){
   const t=getType(), cur=$('#category').value;
@@ -401,12 +413,12 @@ function refreshCatUIs(){
 /* ---------- views ---------- */
 function setView(v){
   state.view=v;
-  $('#viewDash').hidden=v!=='dashboard'; $('#viewRecords').hidden=v!=='records'; $('#viewSettings').hidden=v!=='settings'; $('#viewSavings').hidden=v!=='savings';
+  $('#viewDash').hidden=v!=='dashboard'; $('#viewRecords').hidden=v!=='records'; $('#viewSettings').hidden=v!=='settings'; $('#viewSavings').hidden=v!=='savings'; $('#viewBudget').hidden=v!=='budget';
   $('#entry').hidden=(v==='settings'||v==='savings');
-  const vEl={dashboard:$('#viewDash'),records:$('#viewRecords'),settings:$('#viewSettings'),savings:$('#viewSavings')}[v];
+  const vEl={dashboard:$('#viewDash'),records:$('#viewRecords'),settings:$('#viewSettings'),savings:$('#viewSavings'),budget:$('#viewBudget')}[v];
   vEl.classList.remove('enter'); void vEl.offsetWidth; vEl.classList.add('enter');
   document.querySelectorAll('.tabs button').forEach(b=>{if(b.dataset.view===v)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
-  if(v==='dashboard'){playIntro();renderHero();renderCats();drawTrend();} else if(v==='records')renderRecords(); else if(v==='savings'){playIntro();state.svCount=true;renderSavings();} else syncSettingsUI();
+  if(v==='dashboard'){playIntro();renderHero();renderCats();drawTrend();} else if(v==='records')renderRecords(); else if(v==='budget'){playIntro();renderBudget();} else if(v==='savings'){playIntro();state.svCount=true;renderSavings();} else syncSettingsUI();
 }
 const monthTx=m=>state.tx.filter(t=>t.date.startsWith(m));
 function totals(list){let e=0,i=0;list.forEach(t=>{if(t.type==='expense')e+=t.amount;else i+=t.amount;});return {exp:r2(e),inc:r2(i)};}
@@ -599,7 +611,7 @@ function renderRecords(){
       g.items.map(t=>{
         const c=CAT[t.category]||CAT.other, amt=(t.type==='income'?'+':'\u2212')+money(t.amount), nm=c.label+', '+money(t.amount);
         return '<li class="row" data-id="'+esc(t.id)+'"><span class="dot" style="background:'+c.color+'"></span>'+
-          '<div class="row-main"><span class="row-cat">'+esc(c.label)+'</span>'+(t.note?'<span class="row-note">'+esc(t.note)+'</span>':'')+'</div>'+
+          '<div class="row-main"><span class="row-cat">'+esc(c.label)+'</span>'+((t.note||(t.budgetCat&&bcatOf(t.budgetCat)))?'<span class="row-note">'+esc([t.note,(t.budgetCat&&bcatOf(t.budgetCat))?'Budget: '+bcatOf(t.budgetCat).name:''].filter(Boolean).join('. '))+'</span>':'')+'</div>'+
           '<span class="row-amt '+(t.type==='income'?'inc':'')+'">'+esc(amt)+'</span>'+
           '<div class="acts"><button type="button" class="icon" data-act="edit" aria-label="Edit '+esc(nm)+'" title="Edit">'+ICON_EDIT+'</button>'+
           '<button type="button" class="icon del" data-act="delete" aria-label="Delete '+esc(nm)+'" title="Delete">'+ICON_DEL+'</button></div></li>';
@@ -707,8 +719,8 @@ async function removeCustomCat(id){
 function exportCsv(){
   if(!state.tx.length){toast('Nothing to export yet.');return;}
   const q=s=>'"'+String(s).replace(/"/g,'""')+'"';
-  const rows=['Date,Type,Category,Amount,Note'].concat(state.tx.slice().sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0)
-    .map(t=>[t.date,t.type,q((CAT[t.category]||CAT.other).label),t.amount.toFixed(2),q(t.note)].join(',')));
+  const rows=['Date,Type,Category,Amount,Note,Budget category'].concat(state.tx.slice().sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0)
+    .map(t=>[t.date,t.type,q((CAT[t.category]||CAT.other).label),t.amount.toFixed(2),q(t.note),q((bcatOf(t.budgetCat)||{name:''}).name)].join(',')));
   const blob=new Blob(['\ufeff'+rows.join('\n')],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob); a.download='finance-tracker-'+todayStr()+'.csv';
@@ -748,7 +760,7 @@ async function importCsv(file){
   rows.forEach(r=>{
     const type=String(r[1]||'').trim().toLowerCase()==='income'?'income':'expense';
     const t=cleanTx({id:uid(),type,category:byLabel[type+'|'+String(r[2]||'').trim().toLowerCase()]||'',
-      amount:parseFloat(String(r[3]||'').replace(/,/g,'')),date:String(r[0]||'').trim(),note:String(r[4]||'').trim(),createdAt:Date.now()+out.length});
+      amount:parseFloat(String(r[3]||'').replace(/,/g,'')),date:String(r[0]||'').trim(),note:String(r[4]||'').trim(),budgetCat:((state.budget.cats.find(c=>c.name.toLowerCase()===String(r[5]||'').trim().toLowerCase()))||{}).id||'',createdAt:Date.now()+out.length});
     if(t)out.push(t); else skipped++;
   });
   if(!out.length){toast('No valid rows found in that file.');return;}
@@ -791,7 +803,7 @@ function settle(){
 
 /* ---------- render ---------- */
 function renderAll(){
-  renderHero(); renderCats(); renderRecords(); renderSavings();
+  renderHero(); renderCats(); renderRecords(); renderSavings(); renderBudget();
   if(state.view==='dashboard')drawTrend();
   if(state.view==='settings'){renderAccount();renderSkinPickers();renderCatList();}
 }
@@ -906,9 +918,9 @@ async function onSignedIn(session){
   try{
     await loadAll(); loaded=true;
     if(!trendTouched)autoTrend();
-    syncCurrencyUI(); refreshCatUIs(); playIntro(); setView(state.prefs.openOn); renderAll();
-    subscribe(); subscribeGoals(); setStatus('synced');
-    settle(); hideBoot();
+    syncCurrencyUI(); refreshCatUIs(); fillBudgetSelect(); playIntro(); setView(state.prefs.openOn); renderAll();
+    subscribe(); subscribeGoals(); subscribeBudget(); setStatus('synced');
+    settle(); hideBoot(); checkRollover();
   }catch(e){
     console.error(e); setStatus('error'); userId=null; account.signedIn=false; hideBoot();
     const hint=/relation|does not exist|schema cache|PGRST20/i.test(String((e&&e.message)||''))
@@ -921,6 +933,8 @@ function onSignedOut(){
   if(channel&&sb){sb.removeChannel(channel);channel=null;}
   state.tx=[]; state.goals=[]; state.entries=[]; state.goalsError=false;
   if(goalsChannel&&sb){sb.removeChannel(goalsChannel);goalsChannel=null;}
+  state.budget={cats:[],plans:{},alloc:{}}; state.budgetError=false;
+  if(budgetChannel&&sb){sb.removeChannel(budgetChannel);budgetChannel=null;}
   state.prefs=Object.assign({},state.prefs,{name:'',opening:null,onboarded:false,customCats:[],openOn:'dashboard'});
   rebuildCats(); exitEdit(); settled=false;
   setView('dashboard'); renderAll(); refreshCatUIs();
@@ -1155,6 +1169,408 @@ function onMoneySubmit(e){
   });
 }
 
+/* ---------- budget ---------- */
+let budgetChannel=null, budgetBusy=false, bcatEditId=null, rollInfo=null;
+const SPLITS={
+  p404020:{shares:[40,40,20]},
+  p503020:{shares:[50,30,20]},
+  custom:{shares:null}
+};
+const STARTER=['Daily Living','Academic Needs','Personal Purchases'];
+const newPlan=()=>({income:null,pct:0,mode:'custom',resolved:false});
+const mapBCat=r=>({id:r.id,name:r.name,ci:r.color_index,createdAt:Date.parse(r.created_at)||0});
+const bcatOf=id=>state.budget.cats.find(c=>c.id===id)||null;
+const planOf=m=>state.budget.plans[m]||null;
+const allocRow=(m,id)=>((state.budget.alloc[m]||{})[id])||null;
+const allocOf=(m,id)=>allocRow(m,id)||{pct:0,carried:0};
+const sortedCats=()=>[...state.budget.cats].sort((a,b)=>a.createdAt-b.createdAt||a.name.localeCompare(b.name));
+function poolOf(m){
+  const p=planOf(m), income=p&&p.income?p.income:0, savings=r2(income*(p?p.pct:0)/100);
+  return {income,savings,pool:r2(income-savings)};
+}
+const allocAmount=(m,id)=>r2(poolOf(m).pool*allocOf(m,id).pct/100);
+const availableIn=(m,id)=>r2(allocAmount(m,id)+allocOf(m,id).carried);
+function spentIn(m,id,exceptTx){
+  return r2(state.tx.filter(t=>t.type==='expense'&&t.budgetCat===id&&t.date.startsWith(m)&&t.id!==exceptTx).reduce((s,t)=>s+t.amount,0));
+}
+const remainingIn=(m,id,exceptTx)=>r2(availableIn(m,id)-spentIn(m,id,exceptTx));
+function parsePos(raw){          // '' -> null, invalid -> undefined
+  const s=String(raw).trim().replace(/,/g,'');
+  if(s==='')return null;
+  if(/^(\d+\.?\d*|\.\d+)$/.test(s)){const n=parseFloat(s);return n>1e12?undefined:r2(n);}
+  return undefined;
+}
+function planNumbers(m){
+  const p=planOf(m), base=poolOf(m), al=state.budget.alloc[m]||{};
+  const sumPct=r2(state.budget.cats.reduce((s,c)=>s+((al[c.id]&&al[c.id].pct)||0),0));
+  return {income:base.income,pct:p?p.pct:0,savings:base.savings,pool:base.pool,sumPct,
+    given:r2(base.pool*sumPct/100),leftPct:r2(100-sumPct)};
+}
+
+/* loading */
+async function loadBudget(){
+  const missing=r=>r.error&&/relation|schema cache|does not exist|PGRST205|42P01/i.test(r.error.code+' '+r.error.message);
+  const [c,p,a]=await Promise.all([
+    sb.from('budget_categories').select('id,name,color_index,created_at').order('created_at'),
+    sb.from('budget_plans').select('month,income,savings_pct,split_mode,rollover_resolved'),
+    sb.from('budget_allocations').select('month,category_id,pct,carried')
+  ]);
+  if(missing(c)||missing(p)||missing(a)){state.budgetError=true;state.budget={cats:[],plans:{},alloc:{}};return;}
+  if(c.error)throw c.error; if(p.error)throw p.error; if(a.error)throw a.error;
+  const plans={}, alloc={};
+  p.data.forEach(r=>{plans[r.month]={income:r.income===null?null:Number(r.income),pct:Number(r.savings_pct)||0,mode:SPLITS[r.split_mode]?r.split_mode:'custom',resolved:!!r.rollover_resolved};});
+  a.data.forEach(r=>{(alloc[r.month]||(alloc[r.month]={}))[r.category_id]={pct:Number(r.pct)||0,carried:Number(r.carried)||0};});
+  state.budget={cats:c.data.map(mapBCat),plans,alloc};
+  state.budgetError=!txHasBudgetCol;
+}
+async function reloadBudget(){
+  if(budgetBusy||!sb)return;
+  try{await loadBudget();fillBudgetSelect();scheduleRender();}catch(e){console.error(e);}
+}
+function subscribeBudget(){
+  if(budgetChannel&&sb){sb.removeChannel(budgetChannel);budgetChannel=null;}
+  if(state.budgetError||!sb)return;
+  const bump=()=>setTimeout(reloadBudget,250);
+  budgetChannel=sb.channel('finance-tracker-budget-'+userId)
+    .on('postgres_changes',{event:'*',schema:'public',table:'budget_categories'},bump)
+    .on('postgres_changes',{event:'*',schema:'public',table:'budget_plans'},bump)
+    .on('postgres_changes',{event:'*',schema:'public',table:'budget_allocations'},bump)
+    .subscribe();
+}
+
+/* writes (optimistic; reloaded from the server if they fail) */
+const planRow=(m,p)=>({user_id:userId,month:m,income:p.income,savings_pct:p.pct,split_mode:p.mode,rollover_resolved:p.resolved});
+async function pushBudget(m,plan,rows){
+  budgetBusy=true; setStatus('saving');
+  try{
+    let r=await sb.from('budget_plans').upsert(planRow(m,plan));
+    if(r.error)throw r.error;
+    if(rows&&rows.length){r=await sb.from('budget_allocations').upsert(rows);if(r.error)throw r.error;}
+    setStatus('synced'); return true;
+  }catch(e){
+    console.error(e); setStatus('error'); budgetBusy=false;
+    await reloadBudget();
+    toast("Couldn't save that. Your budget was refreshed from the server.");
+    return false;
+  }finally{budgetBusy=false;}
+}
+async function savePlan(m,patch){
+  const prev=state.budget.plans[m];
+  const next=Object.assign(newPlan(),prev||{},patch);
+  state.budget.plans[m]=next; renderAll(); budgetBusy=true;
+  const ok=await dbRun(sb.from('budget_plans').upsert(planRow(m,next)));
+  budgetBusy=false;
+  if(!ok){
+    if(prev)state.budget.plans[m]=prev; else delete state.budget.plans[m];
+    renderAll(); toast("Couldn't save that. Check your connection and try again.");
+  }
+  return ok;
+}
+async function saveShare(m,catId,pct){
+  const al=state.budget.alloc[m]||(state.budget.alloc[m]={});
+  const prev=al[catId], carried=prev?prev.carried:0, plan=planOf(m);
+  al[catId]={pct,carried};
+  const row={user_id:userId,month:m,category_id:catId,pct,carried};
+  if(plan&&plan.mode!=='custom'){            // editing a preset turns it into your own split
+    state.budget.plans[m]=Object.assign({},plan,{mode:'custom'}); renderAll();
+    return pushBudget(m,state.budget.plans[m],[row]);
+  }
+  renderAll(); budgetBusy=true;
+  const ok=await dbRun(sb.from('budget_allocations').upsert(row));
+  budgetBusy=false;
+  if(!ok){
+    if(prev)al[catId]=prev; else delete al[catId];
+    renderAll(); toast("Couldn't save that share. Check your connection and try again.");
+  }
+  return ok;
+}
+async function applySplit(mode){
+  const m=state.month;
+  if(mode==='custom'){savePlan(m,{mode:'custom'});return;}
+  const cats=sortedCats();
+  if(!cats.length){toast('Create your categories first, or use the starter ones.');return;}
+  const shares=SPLITS[mode].shares, al=state.budget.alloc[m]||(state.budget.alloc[m]={}), rows=[];
+  cats.forEach((c,i)=>{
+    const pct=shares[i]||0, keep=al[c.id]?al[c.id].carried:0;
+    al[c.id]={pct,carried:keep};
+    rows.push({user_id:userId,month:m,category_id:c.id,pct,carried:keep});
+  });
+  const plan=Object.assign(newPlan(),planOf(m)||{},{mode});
+  state.budget.plans[m]=plan; renderAll();
+  const ok=await pushBudget(m,plan,rows);
+  if(ok&&cats.length<3)toast('Only '+cats.length+' categor'+(cats.length===1?'y':'ies')+' so far. Add more to use all three shares.');
+}
+async function saveBCat(c){
+  const i=state.budget.cats.findIndex(x=>x.id===c.id), prev=i>=0?state.budget.cats[i]:null;
+  if(i>=0)state.budget.cats[i]=c; else state.budget.cats.push(c);
+  fillBudgetSelect(); renderAll(); budgetBusy=true;
+  const ok=await dbRun(sb.from('budget_categories').upsert({id:c.id,name:c.name,color_index:c.ci,created_at:new Date(c.createdAt).toISOString()}));
+  budgetBusy=false;
+  if(!ok){
+    const j=state.budget.cats.findIndex(x=>x.id===c.id);
+    if(prev){if(j>=0)state.budget.cats[j]=prev;}else if(j>=0)state.budget.cats.splice(j,1);
+    fillBudgetSelect(); renderAll(); toast("Couldn't save that category. Check your connection and try again.");
+  }
+  return ok;
+}
+async function createStarterCats(){
+  const have=new Set(state.budget.cats.map(c=>c.name.toLowerCase()));
+  const now=Date.now();
+  const add=STARTER.map((name,i)=>({id:uid(),name,ci:i+1,createdAt:now+i})).filter(c=>!have.has(c.name.toLowerCase()));
+  if(!add.length){toast('You already have those categories.');return;}
+  state.budget.cats.push(...add); fillBudgetSelect(); renderAll(); budgetBusy=true;
+  const ok=await dbRun(sb.from('budget_categories').insert(add.map(c=>({id:c.id,name:c.name,color_index:c.ci,created_at:new Date(c.createdAt).toISOString()}))));
+  budgetBusy=false;
+  if(!ok){
+    const ids=new Set(add.map(c=>c.id));
+    state.budget.cats=state.budget.cats.filter(c=>!ids.has(c.id));
+    fillBudgetSelect(); renderAll(); toast("Couldn't add the starter categories. Check your connection and try again.");
+    return;
+  }
+  toast('Starter categories added. Pick a split to share out your budget.');
+}
+async function deleteBCat(id){
+  const c=bcatOf(id); if(!c)return;
+  state.budget.cats=state.budget.cats.filter(x=>x.id!==id);
+  Object.keys(state.budget.alloc).forEach(m=>{delete state.budget.alloc[m][id];});
+  state.tx.forEach(t=>{if(t.budgetCat===id)t.budgetCat='';});
+  fillBudgetSelect(); renderAll(); budgetBusy=true;
+  const ok=await dbRun(sb.from('budget_categories').delete().eq('id',id));
+  budgetBusy=false;
+  if(!ok){await reloadBudget();await reloadTx();toast("Couldn't delete that category. Check your connection and try again.");return;}
+  toast('Deleted '+c.name+'. Its expenses stay in your transactions.');
+}
+async function copyPlan(){
+  const m=state.month, P=addM(m,-1), pp=planOf(P), src=state.budget.alloc[P]||{};
+  if(!pp&&!Object.keys(src).length)return;
+  const plan=Object.assign(newPlan(),planOf(m)||{},{income:pp?pp.income:null,pct:pp?pp.pct:0,mode:pp?pp.mode:'custom'});
+  const al=state.budget.alloc[m]||(state.budget.alloc[m]={}), rows=[];
+  Object.keys(src).forEach(id=>{
+    if(!bcatOf(id))return;
+    const keep=al[id]?al[id].carried:0;
+    al[id]={pct:src[id].pct,carried:keep};
+    rows.push({user_id:userId,month:m,category_id:id,pct:src[id].pct,carried:keep});
+  });
+  state.budget.plans[m]=plan; renderAll();
+  const ok=await pushBudget(m,plan,rows);
+  if(ok)toast('Copied the plan from '+monthName(P,{month:'long'})+'.');
+}
+
+/* expenses charged to a budget category */
+function budgetOver(t){
+  if(!t.budgetCat||t.type!=='expense')return null;
+  const m=t.date.slice(0,7), c=bcatOf(t.budgetCat);
+  if(!c||!allocRow(m,c.id))return null;
+  const rem=remainingIn(m,c.id);
+  return rem<0?{by:-rem,name:c.name}:null;
+}
+function fillBudgetSelect(){
+  const sel=$('#bcat'); if(!sel)return;
+  const cur=sel.value;
+  sel.innerHTML='<option value="">No budget category</option>'+sortedCats().map(c=>'<option value="'+esc(c.id)+'">'+esc(c.name)+'</option>').join('');
+  sel.value=[...sel.options].some(o=>o.value===cur)?cur:'';
+  syncBudgetField();
+}
+function syncBudgetField(){
+  const f=$('#bcatField'); if(!f)return;
+  const show=getType()==='expense'&&!state.budgetError&&state.budget.cats.length>0;
+  f.hidden=!show;
+  if(!show)$('#bcat').value='';
+  updateBudgetHint();
+}
+function updateBudgetHint(){
+  const el=$('#bcatHint'), id=$('#bcat').value; if(!el)return;
+  if(!id){el.textContent='';return;}
+  const m=($('#date').value||todayStr()).slice(0,7), c=bcatOf(id); if(!c){el.textContent='';return;}
+  const mn=monthName(m,{month:'long'});
+  if(!allocRow(m,id)||!poolOf(m).pool){el.textContent='No budget set for '+c.name+' in '+mn+' yet.';return;}
+  const rem=remainingIn(m,id,state.editingId);
+  el.textContent=rem>=0?money(rem)+' left in '+c.name+' for '+mn+'.':'Already '+money(-rem)+' over in '+c.name+' for '+mn+'.';
+}
+
+/* rollover of unspent budget */
+function leftovers(P){
+  const rows=[];
+  state.budget.cats.forEach(c=>{
+    if(!allocRow(P,c.id))return;
+    const left=remainingIn(P,c.id);
+    if(left>0.004)rows.push({cat:c,left});
+  });
+  return rows;
+}
+function pendingRollover(M){
+  if(state.budgetError||M>curYM())return null;
+  const plan=planOf(M); if(plan&&plan.resolved)return null;
+  const P=addM(M,-1), rows=leftovers(P); if(!rows.length)return null;
+  return {from:P,to:M,rows,total:r2(rows.reduce((s,r)=>s+r.left,0))};
+}
+function checkRollover(){
+  if(!state.prefs.onboarded)return;
+  const pr=pendingRollover(curYM()); if(!pr)return;
+  toast('You have '+money(pr.total)+' unspent from '+monthName(pr.from,{month:'long'})+'.','Review',()=>{state.month=curYM();setView('budget');renderAll();openRoll();});
+}
+function openRoll(){
+  const info=pendingRollover(state.month);
+  if(!info){toast('Nothing unspent to decide on for this month.');return;}
+  rollInfo=info;
+  const from=monthName(info.from,{month:'long'}), to=monthName(info.to,{month:'long'});
+  $('#rollTitle').textContent='Unspent budget from '+from;
+  $('#rollRows').innerHTML=info.rows.map(r=>
+    '<div class="roll-row"><div class="roll-main"><span class="dot" style="background:var(--u'+r.cat.ci+')"></span><span class="cl-name">'+esc(r.cat.name)+'</span><b>'+esc(money(r.left))+'</b></div>'+
+    '<select class="inp" data-roll="'+esc(r.cat.id)+'" aria-label="What to do with unspent '+esc(r.cat.name)+' budget">'+
+    '<option value="carry">Carry over to '+esc(to)+'</option>'+
+    (state.goalsError?'':state.goals.map(g=>'<option value="goal:'+esc(g.id)+'">Move to goal: '+esc(g.name)+'</option>').join(''))+
+    '<option value="skip">Let it go</option></select></div>').join('');
+  openDlg($('#rollDlg'));
+}
+async function applyRollover(){
+  const info=rollInfo; if(!info)return;
+  const M=info.to, from=monthName(info.from,{month:'long'});
+  const picks=[...document.querySelectorAll('#rollRows [data-roll]')].map(s=>({row:info.rows.find(r=>r.cat.id===s.dataset.roll),choice:s.value})).filter(p=>p.row);
+  closeDlg($('#rollDlg'));
+  const al=state.budget.alloc[M]||(state.budget.alloc[M]={}), allocRows=[], entries=[];
+  let carried=0, moved=0, skipped=0;
+  picks.forEach(({row,choice})=>{
+    if(choice==='carry'){
+      const cur=al[row.cat.id]||{pct:0,carried:0}, total=r2(cur.carried+row.left);
+      al[row.cat.id]={pct:cur.pct,carried:total};
+      allocRows.push({user_id:userId,month:M,category_id:row.cat.id,pct:cur.pct,carried:total});
+      carried=r2(carried+row.left);
+    }else if(choice.startsWith('goal:')&&state.goals.some(g=>g.id===choice.slice(5))){
+      entries.push({id:uid(),goalId:choice.slice(5),amount:row.left,date:todayStr(),
+        note:('Unspent '+row.cat.name+' budget from '+from).slice(0,80),createdAt:Date.now()+entries.length});
+      moved=r2(moved+row.left);
+    }else skipped=r2(skipped+row.left);
+  });
+  const plan=Object.assign(newPlan(),planOf(M)||{},{resolved:true});
+  state.budget.plans[M]=plan; renderAll();
+  if(!(await pushBudget(M,plan,allocRows))){rollInfo=null;return;}
+  for(const e of entries){
+    if(!(await addEntry(e))){await reloadGoals();return;}
+  }
+  const parts=[];
+  if(carried)parts.push('carried over '+money(carried));
+  if(moved)parts.push('moved '+money(moved)+' to goals');
+  if(skipped)parts.push('let go of '+money(skipped));
+  toast(parts.length?'Done: '+parts.join(', ')+'.':'Done.');
+  rollInfo=null;
+}
+
+/* rendering */
+function setIfIdle(el,v){if(document.activeElement!==el)el.value=v;}
+function bcatCardHTML(c,m){
+  const row=allocRow(m,c.id), a=allocOf(m,c.id), amt=allocAmount(m,c.id);
+  const avail=r2(amt+a.carried), spent=spentIn(m,c.id), left=r2(avail-spent);
+  const over=left<0, w=avail>0?Math.min(100,spent/avail*100):(spent>0?100:0);
+  const meta=[];
+  if(row&&a.pct>0)meta.push('That is '+money(amt)+' of your budget');
+  if(a.carried>0)meta.push('Includes '+money(a.carried)+' carried over');
+  if(over)meta.push('Over by '+money(-left));
+  else if(!row)meta.push('Set a share to start tracking');
+  return '<article class="goal bcat'+(over?' over':'')+'" data-id="'+esc(c.id)+'">'+
+    '<div class="g-top"><span class="dot" style="background:var(--u'+c.ci+')"></span><h3>'+esc(c.name)+'</h3></div>'+
+    '<label class="f"><span>Share of your budget</span><div class="money"><input data-alloc inputmode="decimal" placeholder="0" value="'+(row?esc(String(a.pct)):'')+'" aria-label="Share of budget for '+esc(c.name)+', percent"><i>%</i></div></label>'+
+    '<div class="b-stats"><div><span>Spent</span><b>'+esc(money(spent))+'</b></div><div><span>'+(over?'Over':'Left')+'</span><b class="'+(over?'neg':'')+'">'+esc(money(Math.abs(left)))+'</b></div></div>'+
+    '<div class="gbar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+Math.round(w)+'" aria-label="'+esc(c.name)+' used"><span style="width:'+(w>0?Math.max(2,w):0).toFixed(1)+'%;background:'+(over?'var(--danger)':'var(--u'+c.ci+')')+'"></span></div>'+
+    (meta.length?'<p class="g-meta">'+esc(meta.join('. '))+'.</p>':'')+
+    '<div class="g-actions"><button type="button" class="linkbtn" data-act="bcat-edit">Rename</button><button type="button" class="linkbtn danger" data-act="bcat-delete">Delete</button></div></article>';
+}
+function renderBudget(){
+  if(!$('#viewBudget'))return;
+  const m=state.month;
+  $('#bLabel').textContent=monthName(m);
+  $('#bThis').hidden=m===curYM();
+  const err=state.budgetError, box=$('#bcats');
+  $('#bPlan').hidden=err; $('#bHead').hidden=err;
+  if(err){
+    $('#rollNotice').hidden=true;
+    box.innerHTML='<div class="empty gwide"><p>Budgeting is not set up in your database yet.</p><p>Run <span class="code">supabase/update-03-budget.sql</span> in the Supabase SQL Editor, then reload this page.</p></div>';
+    return;
+  }
+  const n=planNumbers(m), p=planOf(m), mode=p?p.mode:'custom', cats=sortedCats();
+  setIfIdle($('#bIncome'),p&&p.income!=null?String(p.income):'');
+  setIfIdle($('#bPct'),p&&p.pct?String(p.pct):'');
+  document.querySelectorAll('#bSplit [data-split]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.split===mode)));
+  const sh=SPLITS[mode].shares;
+  $('#bSplitHint').textContent=sh
+    ?(cats.length?cats.slice(0,3).map((c,i)=>c.name+' '+sh[i]+'%').join(', ')+'. These go to your first three categories, in the order you made them.':'Create your categories first, then pick a split.')
+    :'Type a percentage on each category below.';
+  const over=n.sumPct>100.0001;
+  $('#bSum').innerHTML=
+    '<div><dt>Savings</dt><dd>'+esc(money(n.savings))+(n.pct?' <small>('+n.pct+'%)</small>':'')+'</dd></div>'+
+    '<div><dt>Budget to share out</dt><dd>'+esc(money(n.pool))+'</dd></div>'+
+    '<div><dt>Shared out</dt><dd>'+esc(money(n.given))+' <small>('+n.sumPct+'%)</small></dd></div>'+
+    '<div><dt>'+(over?'Over by':'Not shared yet')+'</dt><dd class="'+(over?'neg':'')+'">'+Math.abs(n.leftPct)+'%</dd></div>';
+  const warn=$('#bWarn'); let msg='';
+  if(over)msg='Your category shares add up to '+n.sumPct+'%, which is '+(n.sumPct-100)+'% more than your whole budget. Lower some shares.';
+  else if(!n.income&&n.sumPct>0)msg='Type your income for '+monthName(m,{month:'long'})+' to turn these shares into amounts.';
+  warn.textContent=msg; warn.hidden=!msg;
+  const hasData=!!p||Object.keys(state.budget.alloc[m]||{}).length>0;
+  const P=addM(m,-1), canCopy=!hasData&&(!!planOf(P)||Object.keys(state.budget.alloc[P]||{}).length>0);
+  $('#bCopy').hidden=!canCopy;
+  if(canCopy)$('#bCopy').textContent='Copy the plan from '+monthName(P,{month:'long'});
+  const pr=pendingRollover(m), rn=$('#rollNotice');
+  rn.hidden=!pr;
+  if(pr)rn.innerHTML='<p><b>You have '+esc(money(pr.total))+' unspent from '+esc(monthName(pr.from,{month:'long'}))+'.</b> It is spread across '+pr.rows.length+' categor'+(pr.rows.length===1?'y':'ies')+'. Choose what happens to it, or decide later.</p><button type="button" class="secondary" data-act="roll-open">Choose</button>';
+  box.innerHTML=cats.length?cats.map(c=>bcatCardHTML(c,m)).join('')
+    :'<div class="empty gwide"><p>No budget categories yet.</p><p>Start with Daily Living, Academic Needs and Personal Purchases, or make your own.</p><div class="btnrow" style="justify-content:center"><button type="button" class="primary" data-act="bcat-starter">Use the starter categories</button><button type="button" class="secondary" data-act="bcat-new">Create my own</button></div></div>';
+}
+
+/* dialogs */
+function openBcatDlg(id){
+  const c=id?bcatOf(id):null; bcatEditId=c?c.id:null;
+  $('#bdTitle').textContent=c?'Rename category':'New budget category';
+  $('#bdSave').textContent=c?'Save changes':'Create category';
+  $('#bName').value=c?c.name:'';
+  const used=new Set(state.budget.cats.filter(x=>!c||x.id!==c.id).map(x=>x.ci));
+  const first=c?c.ci:([1,2,3,4,5,6,7,8].find(i=>!used.has(i))||1);
+  document.querySelectorAll('input[name="bc"]').forEach(r=>{r.checked=+r.value===first;});
+  $('#bErr').textContent='';
+  openDlg($('#bcatDlg')); setTimeout(()=>$('#bName').focus(),30);
+}
+function onBcatSubmit(e){
+  e.preventDefault();
+  const err=$('#bErr'), name=$('#bName').value.trim().slice(0,30);
+  const picked=document.querySelector('input[name="bc"]:checked'), ci=picked?+picked.value:1;
+  if(!name){err.textContent='Give the category a name.';$('#bName').focus();return;}
+  if(state.budget.cats.some(c=>c.id!==bcatEditId&&c.name.toLowerCase()===name.toLowerCase())){err.textContent='You already have a category called '+name+'.';$('#bName').focus();return;}
+  const old=bcatEditId&&bcatOf(bcatEditId);
+  closeDlg($('#bcatDlg'));
+  saveBCat({id:old?old.id:uid(),name,ci,createdAt:old?old.createdAt:Date.now()}).then(ok=>{
+    if(ok)toast(old?'Category updated.':'Category created. Now set its share of your budget.');
+  });
+}
+
+function wireBudget(){
+  $('#bSw').innerHTML=[1,2,3,4,5,6,7,8].map(i=>'<label><input type="radio" name="bc" value="'+i+'"'+(i===1?' checked':'')+' aria-label="Color '+i+'"><span style="background:var(--u'+i+')"></span></label>').join('');
+  $('#bPrev').addEventListener('click',()=>{state.month=addM(state.month,-1);playIntro();renderAll();});
+  $('#bNext').addEventListener('click',()=>{state.month=addM(state.month,1);playIntro();renderAll();});
+  $('#bThis').addEventListener('click',()=>{state.month=curYM();playIntro();renderAll();});
+  $('#bIncome').addEventListener('change',e=>{
+    const v=parsePos(e.target.value);
+    if(v===undefined){$('#bPlanErr').textContent='Income should be a number, like 25000.';return;}
+    $('#bPlanErr').textContent=''; savePlan(state.month,{income:v});
+  });
+  $('#bPct').addEventListener('change',e=>{
+    const v=parsePos(e.target.value);
+    if(v===undefined||(v!==null&&v>100)){$('#bPlanErr').textContent='Savings should be a percentage from 0 to 100.';return;}
+    $('#bPlanErr').textContent=''; savePlan(state.month,{pct:v===null?0:v});
+  });
+  $('#bSplit').addEventListener('click',e=>{
+    const b=e.target.closest('[data-split]'); if(b)applySplit(b.dataset.split);
+  });
+  $('#bcats').addEventListener('change',e=>{
+    const inp=e.target.closest('[data-alloc]'); if(!inp)return;
+    const id=inp.closest('.bcat').dataset.id, v=parsePos(inp.value);
+    if(v===undefined||(v!==null&&v>100)){toast('A share should be a percentage from 0 to 100.');renderBudget();return;}
+    saveShare(state.month,id,v===null?0:v);
+  });
+  $('#bcatForm').addEventListener('submit',onBcatSubmit);
+  $('#rollApply').addEventListener('click',applyRollover);
+  $('#bcat').addEventListener('change',updateBudgetHint);
+  $('#date').addEventListener('change',updateBudgetHint);
+}
+
 /* ---------- loading screen + motion ---------- */
 let bootShownAt=Date.now(), bootTimer=null, playTimer=null;
 function showBoot(){
@@ -1172,7 +1588,7 @@ function hideBoot(){
 }
 function playIntro(){            // bars grow, lines rise, hero number counts up
   if(reduceMotion())return;
-  const els=[$('#cats'),$('#chartWrap'),$('#goals')];
+  const els=[$('#cats'),$('#chartWrap'),$('#goals'),$('#bcats')];
   els.forEach(e=>e.classList.add('play'));
   state.countUp=true;
   clearTimeout(playTimer);
@@ -1192,7 +1608,7 @@ function animateMoney(el,to){
 
 /* ---------- wiring ---------- */
 function init(){
-  loadSkinCache(); rebuildCats(); applySkin(); wireAuth();
+  loadSkinCache(); rebuildCats(); applySkin(); wireAuth(); wireBudget();
   $('.sw').innerHTML=[1,2,3,4,5,6,7,8].map(i=>'<label><input type="radio" name="cc" value="'+i+'"'+(i===1?' checked':'')+' aria-label="Color '+i+'"><span style="background:var(--u'+i+')"></span></label>').join('');
   $('#gSw').innerHTML=[1,2,3,4,5,6,7,8].map(i=>'<label><input type="radio" name="gc" value="'+i+'"'+(i===1?' checked':'')+' aria-label="Color '+i+'"><span style="background:var(--u'+i+')"></span></label>').join('');
   fillCategories('expense'); fillFilterCats(); syncFilterUI(); syncCurrencyUI();
@@ -1200,7 +1616,7 @@ function init(){
 
   document.querySelectorAll('.tabs button').forEach(b=>b.addEventListener('click',()=>setView(b.dataset.view)));
   document.querySelectorAll('input[name="type"]').forEach(r=>r.addEventListener('change',()=>{
-    const t=getType(); $('#entry').dataset.type=t; fillCategories(t);
+    const t=getType(); $('#entry').dataset.type=t; fillCategories(t); syncBudgetField();
   }));
   $('#category').addEventListener('change',()=>{lastCat[getType()]=$('#category').value;});
   $('#txForm').addEventListener('submit',onSubmit);
@@ -1245,6 +1661,12 @@ function init(){
     if(act==='sample')loadSample();
     else if(act==='clear-filters'){state.filters={q:'',type:'all',cat:'all',period:'month'};syncFilterUI();renderRecords();}
     else if(act==='export')exportCsv();
+    else if(act==='bcat-new')openBcatDlg(null);
+    else if(act==='bcat-starter')createStarterCats();
+    else if(act==='bcat-edit')openBcatDlg(a.closest('.bcat').dataset.id);
+    else if(act==='bcat-delete'){const bid=a.closest('.bcat').dataset.id;confirmTap(a,'Click again to delete',()=>deleteBCat(bid));}
+    else if(act==='b-copy')copyPlan();
+    else if(act==='roll-open')openRoll();
     else if(act==='goal-new')openGoalDlg(null);
     else if(act==='dlg-cancel')closeDlg(a.closest('dialog'));
     else if(act==='goal-add'||act==='goal-withdraw')openMoneyDlg(a.closest('.goal').dataset.id,act==='goal-add'?'deposit':'withdraw');
