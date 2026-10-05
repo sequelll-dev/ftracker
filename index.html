@@ -124,6 +124,7 @@
         <button type="button" class="linkbtn" id="bThis">Back to this month</button>
       </div>
       <div class="notice" id="rollNotice" hidden></div>
+      <div class="b-grid">
       <section class="panel" id="bPlan" aria-labelledby="bPlanH">
         <h2 id="bPlanH">Your month</h2>
         <p class="hint">Type your income, choose how much goes to savings, then decide how to share the rest.</p>
@@ -145,6 +146,21 @@
         <div class="warn" id="bWarn" role="status" hidden></div>
         <div class="btnrow" style="margin-top:12px"><button type="button" class="secondary" data-act="b-copy" id="bCopy" hidden></button></div>
       </section>
+      <section class="panel" id="bPie" aria-labelledby="bPieH">
+        <div class="panel-head">
+          <h2 id="bPieH">Where it goes</h2>
+          <div class="toggle" role="group" aria-label="Pie chart view">
+            <button type="button" data-pie="plan" aria-pressed="true">Plan</button>
+            <button type="button" data-pie="spent" aria-pressed="false">Spent</button>
+          </div>
+        </div>
+        <p class="caption" id="bPieCap"></p>
+        <div class="pie-wrap">
+          <div class="pie-svg" id="bPieSvg"></div>
+          <ul class="pie-legend" id="bPieLegend"></ul>
+        </div>
+      </section>
+      </div>
       <div class="b-head" id="bHead"><h2>Budget categories</h2><button type="button" class="primary" data-act="bcat-new">New category</button></div>
       <div class="goals" id="bcats"></div>
     </section>
